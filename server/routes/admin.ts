@@ -128,13 +128,13 @@ adminRouter.get('/investors', requireAdmin(), (_req, res) => res.json({ investor
 
 adminRouter.post('/investors', requireAdmin('users.write'), wrap(async (req, res) => {
   if (!String(req.body?.name || '').trim()) throw new HttpError(400, 'Investor name is required.');
-  const inv = await createInvestor(req.body || {});
+  const inv = await createInvestor(req.body || {}).catch((e: any) => { throw new HttpError(400, e?.message || 'Invalid investor details.'); });
   await audit(actorOf(req), 'Investor Added', `Added Popular Investor ${inv.name} (${inv.handle}).`, 'MARKET');
   res.json({ investors: listInvestors(true) });
 }));
 
 adminRouter.put('/investors/:id', requireAdmin('users.write'), wrap(async (req, res) => {
-  const inv = await updateInvestor(req.params.id, req.body || {});
+  const inv = await updateInvestor(req.params.id, req.body || {}).catch((e: any) => { throw new HttpError(400, e?.message || 'Invalid investor details.'); });
   if (!inv) throw new HttpError(404, 'Investor not found.');
   await audit(actorOf(req), 'Investor Updated', `Updated Popular Investor ${inv.name} (${inv.handle}).`, 'MARKET');
   res.json({ investors: listInvestors(true) });

@@ -30,15 +30,33 @@ async function consumeToken(raw: string, types: string[]) {
   return t;
 }
 
-export async function sendVerificationEmail(user: any) {
+// Email verification: 6-digit code (stored hashed, 15 min, 5 attempts) plus a fallback link.
+const REG_OTP_MINUTES = 15;
+const regOtpId = (userId: string) => `regotp:${userId}`;
+const regOtpHash = (userId: string, code: string) => sha256(`regotp:${userId}:${code}:${config.jwtSecret}`);
+
+export async function createOtpToken(userId: string): Promise<string> {
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  await db.put('otps', { id: regOtpId(userId), kind: 'register', userId, codeHash: regOtpHash(userId, code), attempts: 0, expires: Date.now() + REG_OTP_MINUTES * 60000, lastSent: Date.now() });
+  return code;
+}
+
+export async function sendVerificationEmail(user: any, otpCode?: string) {
   const token = await createToken('verify', user.id, 72);
-  queueMail({
+  const otp = otpCode || (await createOtpToken(user.id));
+  const r = await sendMail({
     to: user.email,
-    subject: `Verify your ${config.brand.appName} email address`,
-    fromName: 'Accounts',
-    text: `Hi ${user.name},\n\nPlease confirm that this is your email address so we can keep your account secure and send you important notifications.\n\nThis link expires in 72 hours.`,
+    subject: `${otp} is your ${config.brand.appName} verification code`,
+    fromName: 'Security',
+    preheader: `Your verification code is ${otp}`,
+    otp,
+    otpMinutes: REG_OTP_MINUTES,
+    text: `Hi ${user.name},\n\nThanks for opening a ${config.brand.appName} account. Enter this code on the verification screen to activate it.\n\nOr verify with the button below. If you did not create this account, ignore this email.`,
     cta: { label: 'Verify email address', url: `${config.appUrl}/verify-email?token=${token}` },
   });
+  if (mailProvider() === 'log') console.log(`[otp] Verification code for ${user.email}: ${otp} (no email provider configured)`);
+  if (!r.ok) console.error(`[otp] failed to email verification code to ${user.email}: ${r.error}`);
+  return { token, otp, ok: r.ok };
 }
 
 // ---------------- USER ----------------
@@ -64,14 +82,70 @@ authRouter.post('/register', rateLimit('register', 10, 3600), async (req, res) =
     category: 'ACCOUNT',
     direction: 'outbound',
     subject: `Welcome to ${config.brand.appName}, ${user.name.split(' ')[0]}!`,
-    body: `Dear ${user.name},\n\nWelcome to ${config.brand.appName}. Your trading account ${user.id} is ready.\n\nNext steps:\n1. Verify your email address (we sent you a separate link).\n2. Complete identity verification (KYC) in the Verification Centre.\n3. Fund your account and start trading - or practise first with your ${'$'}${config.practiceBalance.toLocaleString()} virtual account.\n\nIf you have any questions, reply to this email or contact ${config.brand.supportEmail}.\n\nThe ${config.brand.appName} Team`,
+    body: `Dear ${user.name},\n\nWelcome to ${config.brand.appName}. Your trading account ${user.id} is ready.\n\nNext steps:\n1. Verify your email address with the 6-digit code we sent you.\n2. Complete identity verification (KYC) in the Verification Centre.\n3. Fund your account and start trading - or practise first with your ${'$'}${config.practiceBalance.toLocaleString()} virtual account.\n\nIf you have any questions, reply to this email or contact ${config.brand.supportEmail}.\n\nThe ${config.brand.appName} Team`,
     cta: { label: 'Open your client portal', url: `${config.appUrl}/dashboard` },
   });
-  await sendVerificationEmail(user);
+  const sent = await sendVerificationEmail(user);
   notifyAdmins(`New registration: ${user.name}`, `${user.name} (${user.email}) just registered.\nAccount: ${user.id}\nCountry: ${user.country || '-'}\nPhone: ${user.phone || '-'}${referrer ? `\nReferred by: ${referrer.name} (${referrer.id})` : ''}`, { label: 'Open admin console', url: `${config.appUrl}/admin` });
 
-  const expiresAt = issueUserSession(res, user.id, remember !== false);
-  res.json({ user: publicUser(user), expiresAt });
+  // No session until the email code is entered - stops throwaway / fake-email signups.
+  res.json({
+    user: publicUser(user),
+    requireOtp: true,
+    otpEmail: cleanEmail,
+    emailSent: sent.ok,
+    message: sent.ok ? `We sent a 6-digit code to ${cleanEmail}.` : 'Your account was created but we could not email your code yet. Tap "Resend code" in a moment.',
+  });
+});
+
+authRouter.post('/verify-otp', rateLimit('verify-otp', 30, 900), async (req, res) => {
+  const cleanEmail = String(req.body?.email || '').trim().toLowerCase();
+  const code = String(req.body?.otp || '').replace(/\D/g, '');
+  if (!cleanEmail || code.length !== 6) return res.status(400).json({ error: 'Enter the 6-digit code from your email.' });
+  const user = findUserByEmail(cleanEmail);
+  const rec = user ? db.get<any>('otps', regOtpId(user.id)) : null;
+  if (!user || !rec || rec.expires < Date.now()) {
+    return res.status(400).json({ error: 'This code has expired. Tap "Resend code" to get a new one.' });
+  }
+  const a = Buffer.from(regOtpHash(user.id, code));
+  const b = Buffer.from(rec.codeHash);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    const attempts = (rec.attempts || 0) + 1;
+    if (attempts >= 5) {
+      await db.remove('otps', rec.id);
+      return res.status(400).json({ error: 'Too many incorrect codes. Tap "Resend code" to get a new one.' });
+    }
+    await db.update('otps', rec.id, { attempts });
+    return res.status(400).json({ error: `Incorrect code. ${5 - attempts} attempt${5 - attempts === 1 ? '' : 's'} left.` });
+  }
+  await db.remove('otps', rec.id);
+  if (user.status === 'Suspended') return res.status(403).json({ error: `This account is suspended. Please contact ${config.brand.supportEmail}.` });
+  await db.update('users', user.id, { emailVerified: true, lastIp: clientIp(req), lastLogin: new Date().toISOString() });
+  await audit('Email Verified', 'OTP Verification', `Client ${user.name} (${user.email}) verified their email with a 6-digit code.`, 'USER_MGMT', `${user.id} (${user.name})`);
+  const expiresAt = issueUserSession(res, user.id, true);
+  res.json({ ok: true, message: `Email verified. Welcome to ${config.brand.appName}!`, user: publicUser(db.get('users', user.id)), expiresAt });
+});
+
+authRouter.post('/resend-otp', rateLimit('resend-otp', 10, 900), async (req, res) => {
+  const cleanEmail = String(req.body?.email || '').trim().toLowerCase();
+  if (!cleanEmail) return res.status(400).json({ error: 'Email address is required.' });
+  const generic = { ok: true, message: `If an account exists for ${cleanEmail}, a new code has been sent.` };
+  const user = findUserByEmail(cleanEmail);
+  if (!user || user.emailVerified) return res.json(generic);
+  const prev = db.get<any>('otps', regOtpId(user.id));
+  const wait = prev ? 30000 - (Date.now() - (prev.lastSent || 0)) : 0;
+  if (wait > 0) return res.status(429).json({ error: `Please wait ${Math.ceil(wait / 1000)}s before requesting another code.` });
+  const r = await sendVerificationEmail(user);
+  if (!r.ok) return res.status(502).json({ error: 'We could not email your code right now. Please try again shortly.' });
+  res.json({ ok: true, message: `A new 6-digit code has been sent to ${cleanEmail}.` });
+});
+
+authRouter.post('/request-email-otp', requireUser, rateLimit('req-otp', 10, 900), async (req, res) => {
+  const user = (req as any).user;
+  if (user.emailVerified) return res.json({ ok: true, message: 'Your email is already verified.' });
+  const r = await sendVerificationEmail(user);
+  if (!r.ok) return res.status(502).json({ error: 'We could not email your code right now. Please try again shortly.' });
+  res.json({ ok: true, message: `A new 6-digit code has been sent to ${user.email}.` });
 });
 
 // ---------- Login: password -> emailed one-time code -> session ----------
@@ -268,7 +342,7 @@ authRouter.post('/resend-verification', requireUser, rateLimit('resend', 5, 3600
   const user = (req as any).user;
   if (user.emailVerified) return res.json({ ok: true, message: 'Your email is already verified.' });
   await sendVerificationEmail(user);
-  res.json({ ok: true, message: `Verification link sent to ${user.email}.` });
+  res.json({ ok: true, message: `Verification code and link sent to ${user.email}.` });
 });
 
 authRouter.post('/change-password', requireUser, async (req, res) => {

@@ -36,7 +36,8 @@ import {
   Server,
   Sparkles,
   LogOut,
-  Clock
+  Clock,
+  Menu,
 } from 'lucide-react';
 import { TradeSharkLogo } from './TradeSharkLogo';
 import { useBrokerage } from '../context/BrokerageContext';
@@ -54,6 +55,11 @@ interface AdminPortalModalProps {
   onClose: () => void;
   onSwitchToUserDashboard?: () => void;
 }
+
+const ADMIN_SHORT_TITLES: Record<string, string> = {
+  overview: 'Overview', users: 'Clients', setup: 'Add client', kyc: 'KYC', funding: 'Funding', emails: 'Emails',
+  markets: 'Markets', copytrader: 'CopyTrader', audit: 'Audit log', settings: 'Payments',
+};
 
 const ADMIN_TABS: AdminTab[] = ['overview', 'users', 'setup', 'kyc', 'funding', 'emails', 'markets', 'copytrader', 'audit', 'settings'];
 
@@ -73,6 +79,7 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
     auditLogs,
     emails,
     positions,
+    copies,
     marketAssets,
     payments,
     createUser,
@@ -98,6 +105,7 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
     notify
   } = useBrokerage();
 
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<AdminTab>(() => (ADMIN_TABS.includes(initialTab as AdminTab) ? initialTab as AdminTab : 'overview'));
   const [notification, setNotification] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -271,7 +279,7 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
     funding: { title: 'Funding Approvals & Capital Queue', subtitle: 'Treasury desk clearance for deposits and withdrawals' },
     emails: { title: 'Email Dispatch & Client Communications', subtitle: 'Automated compliance notices, margin calls, and broadcast announcements' },
     markets: { title: 'Market Trading & Risk Controls', subtitle: 'Dynamic spread overrides, circuit breaker halting, and slippage management' },
-    copytrader: { title: 'CopyTrader & Popular Investors', subtitle: 'Add, edit or hide investors and manage every client copy portfolio' },
+    copytrader: { title: 'CopyTrader', subtitle: 'Investors clients can copy, with photos, and every client copy' },
     audit: { title: 'Regulatory Compliance Audit Trail', subtitle: 'Immutable administrative logs with millisecond timestamps' },
     settings: { title: 'Payment & Deposit Settings', subtitle: 'Bank and crypto details shown to clients and included in deposit emails' }
   };
@@ -298,9 +306,9 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-1 sm:p-4 bg-black/90 backdrop-blur-md animate-fadeIn">
+    <div className="fixed inset-0 z-50 flex items-stretch lg:items-center justify-center lg:p-4 bg-black/90 backdrop-blur-md animate-fadeIn">
       <div 
-        className="w-full max-w-7xl h-[94vh] bg-[#10120a] border border-[#6dff8a]/40 rounded-3xl shadow-2xl flex overflow-hidden text-left"
+        className="w-full lg:max-w-7xl h-[100dvh] lg:h-[94vh] bg-[#10120a] lg:border border-[#6dff8a]/40 lg:rounded-3xl shadow-2xl flex overflow-hidden text-left"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Dedicated Admin Sidebar */}
@@ -315,6 +323,8 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
           onLogout={() => handleLogout(false)}
           onSwitchToUserPortal={onSwitchToUserDashboard}
           onClose={onClose}
+          isMobileOpen={mobileNavOpen}
+          onCloseMobile={() => setMobileNavOpen(false)}
         />
 
         {/* Right Main Body Content */}
@@ -328,17 +338,21 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
           )}
 
           {/* Header Bar */}
-          <div className="p-4 sm:p-5 border-b border-white/10 bg-[#161a0f] flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-bold text-white">
-                  {tabTitles[activeTab]?.title || 'Back-Office & User Control Suite'}
-                </h2>
-                <span className="text-[10px] bg-yellow-400 text-black font-mono px-2 py-0.5 rounded font-bold uppercase">
-                  /#admin
-                </span>
-              </div>
-              <p className="text-xs text-[#a3a89e]">
+          <div className="px-3 py-2.5 sm:p-5 border-b border-white/10 bg-[#161a0f] flex items-center justify-between gap-2 pt-[max(0.625rem,env(safe-area-inset-top))] lg:pt-5">
+            <button
+              onClick={() => setMobileNavOpen(true)}
+              className="lg:hidden shrink-0 w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 text-white flex items-center justify-center relative"
+              aria-label="Open admin menu"
+            >
+              <Menu className="w-5 h-5" />
+              {(pendingKycCount + pendingFundingCount) > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-yellow-400" />}
+            </button>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-base sm:text-lg font-bold text-white truncate">
+                <span className="lg:hidden">{ADMIN_SHORT_TITLES[activeTab] || 'Admin'}</span>
+                <span className="hidden lg:inline">{tabTitles[activeTab]?.title || 'Back-Office & User Control Suite'}</span>
+              </h2>
+              <p className="hidden sm:block text-xs text-[#a3a89e] truncate">
                 {tabTitles[activeTab]?.subtitle || 'TradeShark Super-Admin Terminal'}
               </p>
             </div>
@@ -390,14 +404,14 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
                 onClick={() => setActiveTab('setup')}
                 className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-1.5 rounded-xl bg-[#6dff8a] text-[#15170f] text-xs font-bold hover:bg-[#5ce077] transition-colors shadow-sm"
               >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>+ Setup User</span>
+                <UserPlus className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                <span className="hidden sm:inline">Add client</span>
               </button>
 
               {/* Sign Out / Lock Button */}
               <button
                 onClick={() => handleLogout(false)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 text-xs font-semibold transition-colors"
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/30 text-xs font-semibold transition-colors"
                 title="Sign out & lock administrative terminal"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -414,14 +428,14 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
           </div>
 
           {/* System Telemetry & Pending Queues Ribbon */}
-          <div className="px-6 py-2.5 bg-[#14160d] border-b border-white/5 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-4 text-white/70">
+          <div className="px-3 sm:px-6 py-2 sm:py-2.5 bg-[#14160d] border-b border-white/5 flex items-center justify-between gap-3 text-xs overflow-x-auto whitespace-nowrap">
+            <div className="hidden sm:flex items-center gap-4 text-white/70">
               <span className="flex items-center gap-1.5 text-[#6dff8a]">
                 <span className="w-2 h-2 rounded-full bg-[#6dff8a] animate-pulse" />
                 Engine: LD4 London (1.2ms)
               </span>
               <span className="hidden sm:inline text-white/40">|</span>
-              <span className="hidden sm:inline">Total Client Funds: <strong className="text-white">$842,610,940</strong></span>
+              <span className="hidden sm:inline">Total Client Funds: <strong className="text-white tabular-nums">${users.reduce((a, u) => a + (Number(u.realBalance) || 0), 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong></span>
               <span className="hidden md:inline text-white/40">|</span>
               <span className="hidden md:inline">Registered Accounts: <strong className="text-white">{users.length}</strong></span>
             </div>
@@ -443,7 +457,7 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
                   className="flex items-center gap-1.5 bg-[#6dff8a]/15 border border-[#6dff8a]/40 text-[#6dff8a] px-2.5 py-1 rounded-full font-bold text-[11px] hover:bg-[#6dff8a]/25 transition-colors"
                 >
                   <DollarSign className="w-3 h-3" />
-                  <span>{pendingFundingCount} Funding Requests</span>
+                  <span>{pendingFundingCount} Funding<span className="hidden sm:inline"> requests</span></span>
                 </button>
               )}
             </div>
@@ -455,41 +469,30 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
             {/* TAB 0: EXECUTIVE OVERVIEW */}
             {activeTab === 'overview' && (
               <div className="space-y-6">
-                {/* 4 Top KPI Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1">
-                    <span className="text-xs text-white/50 block">Custody Client Capital</span>
-                    <span className="text-2xl font-bold text-white font-mono">$842,610,940</span>
-                    <div className="text-[11px] text-[#6dff8a] flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" />
-                      <span>Client funds kept separate</span>
+                {/* 4 Top KPI Cards (live figures) */}
+                {(() => {
+                  const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+                  const clientCash = users.reduce((t, u) => t + (Number(u.realBalance) || 0), 0);
+                  const openValue = positions.reduce((t, p: any) => t + (Number(p.invested) || 0) + (Number(p.profit) || 0), 0);
+                  const copyValue = copies.reduce((t, c) => t + (Number(c.currentValue) || 0), 0);
+                  const kpis: { label: string; value: string; note: string; tone?: string; tab?: AdminTab }[] = [
+                    { label: 'Client cash', value: money(clientCash), note: 'Available real balances', tab: 'users' },
+                    { label: 'Invested now', value: money(openValue + copyValue), note: `${positions.length} positions · ${copies.length} copies`, tone: 'text-[#6dff8a]', tab: 'markets' },
+                    { label: 'Clients', value: String(users.length), note: `${users.filter(u => u.status === 'Active').length} active · ${users.filter(u => u.status !== 'Active').length} restricted`, tab: 'users' },
+                    { label: 'Needs action', value: String(pendingKycCount + pendingFundingCount), note: `${pendingKycCount} KYC · ${pendingFundingCount} funding`, tone: (pendingKycCount + pendingFundingCount) ? 'text-yellow-400' : 'text-white', tab: pendingKycCount ? 'kyc' : 'funding' },
+                  ];
+                  return (
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                      {kpis.map(k => (
+                        <button key={k.label} onClick={() => k.tab && setActiveTab(k.tab)} className="text-left p-3 sm:p-4 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-white/20 space-y-1 min-w-0">
+                          <span className="text-xs text-white/50 block">{k.label}</span>
+                          <span className={`text-lg sm:text-2xl font-bold tabular-nums block truncate ${k.tone || 'text-white'}`}>{k.value}</span>
+                          <span className="text-[11px] text-white/50 block truncate">{k.note}</span>
+                        </button>
+                      ))}
                     </div>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1">
-                    <span className="text-xs text-white/50 block">24h Institutional Turnover</span>
-                    <span className="text-2xl font-bold text-[#6dff8a] font-mono">$3,184,290,000</span>
-                    <div className="text-[11px] text-white/60">Across 5,000+ CFD &amp; Stock books</div>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1">
-                    <span className="text-xs text-white/50 block">Active Trader Accounts</span>
-                    <span className="text-2xl font-bold text-white font-mono">{users.length} Traders</span>
-                    <div className="text-[11px] text-yellow-400">
-                      {users.filter(u => u.status === 'Active').length} Active • {users.filter(u => u.status !== 'Active').length} Restricted
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1">
-                    <span className="text-xs text-white/50 block">Compliance Action Required</span>
-                    <span className="text-2xl font-bold text-yellow-400 font-mono">
-                      {pendingKycCount + pendingFundingCount} Queued
-                    </span>
-                    <div className="text-[11px] text-white/60">
-                      {pendingKycCount} KYC • {pendingFundingCount} Fundings
-                    </div>
-                  </div>
-                </div>
+                  );
+                })()}
 
                 {/* Operations Quick Hub */}
                 <div className="p-5 rounded-3xl bg-gradient-to-r from-white/[0.04] to-white/[0.01] border border-white/10 space-y-4">
@@ -629,9 +632,9 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
           {activeTab === 'users' && (
             <div className="space-y-4">
               {/* Filter & Search Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-white/[0.02] p-3 rounded-2xl border border-white/5">
-                <div className="flex items-center gap-2 flex-1 min-w-[240px]">
-                  <div className="relative w-full max-w-sm">
+              <div className="flex flex-col md:flex-row md:flex-wrap md:items-center justify-between gap-3 bg-white/[0.02] p-3 rounded-2xl border border-white/5">
+                <div className="flex items-center gap-2 flex-1 md:min-w-[240px]">
+                  <div className="relative w-full md:max-w-sm">
                     <Search className="w-4 h-4 text-white/40 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
@@ -642,12 +645,12 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
                     />
                   </div>
 
-                  <div className="flex items-center gap-1 text-xs">
+                  <div className="flex items-center gap-1 text-xs overflow-x-auto">
                     {(['ALL', 'Active', 'Trading Frozen', 'Suspended'] as const).map((st) => (
                       <button
                         key={st}
                         onClick={() => setStatusFilter(st)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+ className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
                           statusFilter === st 
                             ? 'bg-[#6dff8a] text-[#15170f]' 
                             : 'bg-white/5 text-white/60 hover:text-white'
@@ -664,10 +667,46 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
                 </div>
               </div>
 
-              {/* Users Table */}
-              <div className="border border-white/10 rounded-2xl overflow-hidden bg-black/20">
+              {/* Clients: cards on phones */}
+              <div className="md:hidden space-y-2.5">
+                {filteredUsers.length === 0 && <div className="p-6 rounded-2xl border border-dashed border-white/15 text-center text-sm text-white/55">No clients match this search.</div>}
+                {filteredUsers.map((u) => {
+                  const isCurrent = currentUser?.id === u.id;
+                  const statusTone = u.status === 'Active' ? 'text-[#6dff8a] bg-[#6dff8a]/10' : u.status === 'Suspended' ? 'text-[#ff7a7a] bg-[#ff5c5c]/10' : 'text-yellow-300 bg-yellow-300/10';
+                  const kycTone = u.kycStatus === 'Approved' ? 'text-[#6dff8a]' : u.kycStatus === 'Rejected' ? 'text-[#ff7a7a]' : 'text-yellow-300';
+                  return (
+                    <div key={u.id} className={`p-4 rounded-2xl border ${isCurrent ? 'border-[#6dff8a]/30 bg-[#6dff8a]/[0.03]' : 'border-white/10 bg-white/[0.03]'} space-y-3`}>
+                      <button onClick={() => setInspectingUser(u)} className="w-full flex items-center gap-3 text-left">
+                        <div className="w-11 h-11 rounded-2xl bg-white/10 flex items-center justify-center font-bold text-sm text-white shrink-0">{u.name.slice(0, 2).toUpperCase()}</div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-white truncate">{u.name}</div>
+                          <div className="text-xs text-white/50 truncate">{u.email}</div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-bold text-white tabular-nums">${u.realBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                          <div className="text-[11px] text-white/45">{u.id}</div>
+                        </div>
+                      </button>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <span className={`px-2 py-0.5 rounded-md font-semibold ${statusTone}`}>{u.status}</span>
+                        <span className={`px-2 py-0.5 rounded-md bg-white/5 ${kycTone}`}>KYC {u.kycStatus}</span>
+                        <span className="px-2 py-0.5 rounded-md bg-white/5 text-white/65">{u.tier.replace(/^Tier \d - /, '')}</span>
+                        <span className="px-2 py-0.5 rounded-md bg-white/5 text-white/65">1:{u.leverage}</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <button onClick={() => { setBalanceModalUser(u); setAdjustAmount('2500'); }} className="h-10 rounded-xl bg-white/5 text-xs font-semibold text-white">Adjust funds</button>
+                        <button onClick={() => setInspectingUser(u)} className="h-10 rounded-xl bg-[#6dff8a]/15 text-xs font-bold text-[#6dff8a]">Manage</button>
+                        <button onClick={() => setCurrentUserId(u.id)} className={`h-10 rounded-xl text-xs font-semibold ${isCurrent ? 'bg-[#6dff8a] text-[#15170f]' : 'bg-white/5 text-white/75'}`}>{isCurrent ? 'Viewing' : 'View as'}</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Users Table (tablet & desktop) */}
+              <div className="hidden md:block border border-white/10 rounded-2xl overflow-hidden bg-black/20">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full min-w-[880px] lg:min-w-0 text-left text-xs">
                     <thead className="bg-[#181b11] text-white/50 uppercase border-b border-white/10 font-mono text-[10px]">
                       <tr>
                         <th className="p-3.5">Trader ID &amp; Name</th>
@@ -870,8 +909,8 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
                   <span className="text-xs text-white/40">1-click approve will immediately balance-sync with user account</span>
                 </div>
 
-                <div className="border border-white/10 rounded-2xl overflow-hidden bg-black/20">
-                  <table className="w-full text-left text-xs">
+                <div className="border border-white/10 rounded-2xl overflow-x-auto bg-black/20">
+                  <table className="w-full min-w-[880px] md:min-w-0 text-left text-xs">
                     <thead className="bg-[#181b11] text-white/50 uppercase border-b border-white/10 font-mono text-[10px]">
                       <tr>
                         <th className="p-3.5">Ref / Date</th>
@@ -1293,8 +1332,8 @@ const AdminPortalInner: React.FC<AdminPortalModalProps> = ({
                 </button>
               </div>
 
-              <div className="border border-white/10 rounded-2xl overflow-hidden bg-black/20">
-                <table className="w-full text-left text-xs">
+              <div className="border border-white/10 rounded-2xl overflow-x-auto bg-black/20">
+                <table className="w-full min-w-[880px] md:min-w-0 text-left text-xs">
                   <thead className="bg-[#181b11] text-white/50 uppercase border-b border-white/10 font-mono text-[10px]">
                     <tr>
                       <th className="p-3.5">Asset</th>

@@ -12,7 +12,7 @@ import {
   PopularInvestor,
 } from '../types';
 import { api, errMsg } from '../lib/api';
-import { INSTRUMENTS, POPULAR_INVESTORS } from '../data/mockData';
+import { INSTRUMENTS } from '../data/mockData';
 
 // ------------------------------------------------------------------
 // Types
@@ -134,7 +134,10 @@ interface BrokerageContextType {
   loginUser: (identifier: string, password: string, remember: boolean) => Promise<UserAccount | LoginChallenge>;
   verifyLoginOtp: (challengeId: string, code: string) => Promise<UserAccount>;
   resendLoginOtp: (challengeId: string) => Promise<string>;
-  registerUser: (data: { name: string; email: string; password: string; phone?: string; country?: string; ref?: string }) => Promise<UserAccount>;
+  registerUser: (data: { name: string; email: string; password: string; phone?: string; country?: string; ref?: string }) => Promise<UserAccount & { debugOtp?: string; requireOtp?: boolean; message?: string }>;
+  verifyOtp: (email: string, otp: string) => Promise<UserAccount>;
+  resendOtp: (email: string) => Promise<{ ok: boolean; message: string; debugOtp?: string }>;
+  requestEmailOtp: () => Promise<{ ok: boolean; message: string; debugOtp?: string }>;
   logoutUser: () => Promise<void>;
   requestPasswordReset: (email: string) => Promise<string>;
   resetPassword: (token: string, password: string) => Promise<void>;
@@ -229,10 +232,10 @@ export const BrokerageProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, []);
 
-  const [investors, setInvestors] = useState<PopularInvestor[]>(POPULAR_INVESTORS);
+  const [investors, setInvestors] = useState<PopularInvestor[]>([]);
   const loadInvestors = useCallback(async () => {
     try {
-      const r = await api.get('/api/investors');
+      const r = await api.get('/api/me/investors');
       if (Array.isArray(r.investors)) setInvestors(r.investors);
     } catch { /* keep last known list */ }
   }, []);
@@ -267,7 +270,7 @@ export const BrokerageProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           setAdminSession({ ...adm.admin, expiresAt: adm.expiresAt });
           await loadAdmin();
         }
-        await Promise.all([loadQuotes(), loadInvestors()]);
+        await Promise.all([loadQuotes(), me?.user ? loadInvestors() : Promise.resolve()]);
       } finally {
         setReady(true);
       }
@@ -275,7 +278,7 @@ export const BrokerageProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [loadUser, loadAdmin, loadQuotes, loadInvestors]);
 
   const refresh = useCallback(async () => {
-    await Promise.all([currentUser ? loadUser() : Promise.resolve(), adminSession ? loadAdmin() : Promise.resolve(), loadQuotes(), loadInvestors()]);
+    await Promise.all([currentUser ? loadUser() : Promise.resolve(), adminSession ? loadAdmin() : Promise.resolve(), loadQuotes(), currentUser ? loadInvestors() : Promise.resolve()]);
   }, [currentUser, adminSession, loadUser, loadAdmin, loadQuotes, loadInvestors]);
 
   // Background polling keeps balances, approvals and prices in sync across portals.
@@ -307,7 +310,7 @@ export const BrokerageProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [adminData, userData]);
 
   const instruments: Instrument[] = useMemo(
-    () => INSTRUMENTS.map(i => (quotes[i.symbol] ? { ...i, price: quotes[i.symbol].price, deltaPercent: quotes[i.symbol].deltaPercent } : i)),
+    () => INSTRUMENTS.map(i => (quotes[i.symbol] ? { ...i, price: quotes[i.symbol].price, deltaPercent: quotes[i.symbol].deltaPercent, halted: !!quotes[i.symbol].halted, status: quotes[i.symbol].halted ? 'Halted' : 'Active' } : i)),
     [quotes]
   );
 
@@ -333,6 +336,7 @@ export const BrokerageProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (r.otpRequired) return { otpRequired: true, challengeId: r.challengeId, email: r.email, expiresInMinutes: r.expiresInMinutes };
     setCurrentUser(r.user);
     await loadUser();
+    loadInvestors();
     return r.user as UserAccount;
   };
 
@@ -340,6 +344,7 @@ export const BrokerageProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const r = await api.post('/api/auth/login/verify', { challengeId, code });
     setCurrentUser(r.user);
     await loadUser();
+    loadInvestors();
     return r.user as UserAccount;
   };
 
@@ -351,15 +356,27 @@ export const BrokerageProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const registerUser: BrokerageContextType['registerUser'] = async (data) => {
     const ref = data.ref || new URLSearchParams(window.location.search).get('ref') || sessionStorageSafeGet('ts_ref') || undefined;
     const r = await api.post('/api/auth/register', { ...data, ref, remember: true });
+    if (!r.requireOtp) { setCurrentUser(r.user); await loadUser(); }
+    return { ...r.user, requireOtp: !!r.requireOtp, message: r.message } as UserAccount & { requireOtp?: boolean; message?: string };
+  };
+
+  const verifyOtp = async (email: string, otp: string) => {
+    const r = await api.post('/api/auth/verify-otp', { email, otp });
     setCurrentUser(r.user);
     await loadUser();
+    loadInvestors();
     return r.user as UserAccount;
   };
+
+  const resendOtp = async (email: string) => api.post('/api/auth/resend-otp', { email });
+
+  const requestEmailOtp = async () => api.post('/api/auth/request-email-otp');
 
   const logoutUser = async () => {
     await api.post('/api/auth/logout').catch(() => undefined);
     setCurrentUser(null);
     setUserData(null);
+    setInvestors([]);
   };
 
   const requestPasswordReset = async (email: string) => {
@@ -580,7 +597,7 @@ export const BrokerageProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     <BrokerageContext.Provider value={{
       ready, config, instruments, users, currentUser, adminSession, transactions, auditLogs, positions, emails, copies,
       marketAssets, payments, toasts, notify, refresh, investors, setInvestors,
-      loginUser, verifyLoginOtp, resendLoginOtp, registerUser, logoutUser, requestPasswordReset, resetPassword, verifyEmail, resendVerification,
+      loginUser, verifyLoginOtp, resendLoginOtp, registerUser, verifyOtp, resendOtp, requestEmailOtp, logoutUser, requestPasswordReset, resetPassword, verifyEmail, resendVerification,
       changePassword, updateProfile, loginAdmin, logoutAdmin,
       setCurrentUserId, createUser, updateUser, setUserStatus, toggleTradingPermission, updateUserTier, updateUserLeverage,
       sendPasswordReset, deleteUser,

@@ -476,8 +476,8 @@ export const AdminEmailsTab: React.FC<AdminEmailsTabProps> = ({ onNotify }) => {
             </span>
           </div>
 
-          <div className="border border-white/10 rounded-2xl overflow-hidden bg-black/20">
-            <table className="w-full text-left text-xs">
+          <div className="border border-white/10 rounded-2xl overflow-x-auto bg-black/20">
+            <table className="w-full min-w-[720px] md:min-w-0 text-left text-xs">
               <thead className="bg-[#181b11] text-white/50 uppercase border-b border-white/10 font-mono text-[10px]">
                 <tr>
                   <th className="p-3.5">Recipient &amp; Target</th>
@@ -549,8 +549,8 @@ export const AdminEmailsTab: React.FC<AdminEmailsTabProps> = ({ onNotify }) => {
       {/* SUBTAB 3: CLIENT INBOUND INQUIRIES */}
       {subTab === 'inbound' && (
         <div className="space-y-4">
-          <div className="border border-white/10 rounded-2xl overflow-hidden bg-black/20">
-            <table className="w-full text-left text-xs">
+          <div className="border border-white/10 rounded-2xl overflow-x-auto bg-black/20">
+            <table className="w-full min-w-[720px] md:min-w-0 text-left text-xs">
               <thead className="bg-[#181b11] text-white/50 uppercase border-b border-white/10 font-mono text-[10px]">
                 <tr>
                   <th className="p-3.5">Client &amp; ID</th>

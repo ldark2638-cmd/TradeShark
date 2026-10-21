@@ -143,7 +143,14 @@ const clean = (b: any) => {
   const out: Partial<InvestorRecord> = {};
   if (b.name !== undefined) out.name = String(b.name).trim();
   if (b.handle !== undefined) { const h = String(b.handle).trim(); out.handle = h.startsWith('@') ? h : `@${h}`; }
-  if (b.avatarUrl !== undefined) out.avatarUrl = String(b.avatarUrl).trim();
+  if (b.avatarUrl !== undefined) {
+    const v = String(b.avatarUrl).trim();
+    const isData = /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v);
+    const isUrl = /^https?:\/\/\S+$/.test(v);
+    if (v && !isData && !isUrl) throw new Error('Photo must be an uploaded image or an https:// link.');
+    if (isData && v.length > 600_000) throw new Error('Photo is too large - please use a smaller image.');
+    out.avatarUrl = v;
+  }
   if (b.role !== undefined) out.role = String(b.role).trim();
   if (b.bio !== undefined) out.bio = String(b.bio).trim();
   if (b.return24M !== undefined) out.return24M = Number(b.return24M) || 0;

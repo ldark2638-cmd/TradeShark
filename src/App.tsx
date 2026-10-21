@@ -19,7 +19,6 @@ import { CookieBanner } from './components/CookieBanner';
 // Modals
 import { SearchModal } from './components/SearchModal';
 import { TradeModal } from './components/TradeModal';
-import { CopyModal } from './components/CopyModal';
 import { AuthModal } from './components/AuthModal';
 import { AiChatDrawer } from './components/AiChatDrawer';
 import { UserDashboardModal } from './components/UserDashboardModal';
@@ -30,7 +29,7 @@ import { ContentPage } from './pages/ContentPage';
 import { MarketsPage } from './pages/MarketsPage';
 import { ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage, NotFoundPage } from './pages/AuthPages';
 
-import { Instrument, PopularInvestor } from './types';
+import { Instrument } from './types';
 import { PAGE_BY_SLUG, LEGACY_LINKS, CtaAction } from './data/pages';
 import { ArrowUp, ArrowRight, LayoutGrid, BarChart2, Zap, Briefcase, Bot } from 'lucide-react';
 import { useBrokerage } from './context/BrokerageContext';
@@ -44,7 +43,6 @@ export default function App() {
   const loc = useLocation();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [tradeInstrument, setTradeInstrument] = useState<Instrument | null>(null);
-  const [copyInvestor, setCopyInvestor] = useState<PopularInvestor | null>(null);
   const [authModal, setAuthModal] = useState<{ isOpen: boolean; mode: 'login' | 'signup' }>({ isOpen: false, mode: 'signup' });
   const [isAiChatOpen, setIsAiChatOpen] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -88,6 +86,17 @@ export default function App() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  useEffect(() => {
+    if (path === '/shark-ai') {
+      setIsAiChatOpen(true);
+    }
+  }, [path]);
+
+  // CopyTrader investors are private to signed-in clients: send old public links into the dashboard.
+  useEffect(() => {
+    if (path === '/popular-investors' || path === '/copy-trader') navigate('/dashboard?tab=copy', { replace: true });
+  }, [path]);
+
   const openUserDashboard = (tab?: string) => {
     returnPath.current = lastContentPath.current;
     navigate(`/dashboard${tab ? `?tab=${tab}` : ''}`);
@@ -114,7 +123,7 @@ export default function App() {
       case 'deposit': return openUserDashboard('deposit');
       case 'kyc': return openUserDashboard('kyc');
       case 'practice': return currentUser ? openUserDashboard() : openAuth('signup');
-      case 'copy': return navigate('/popular-investors');
+      case 'copy': return openUserDashboard('copy');
       case 'ai': return setIsAiChatOpen(true);
     }
   };
@@ -193,7 +202,7 @@ export default function App() {
       </div>
 
       {/* ── Mobile App Bottom Navigation Bar ── */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-50" style={{background: 'rgba(15,17,10,0.97)', backdropFilter: 'blur(20px)', borderTop: '1px solid rgba(255,255,255,0.08)'}}>
+      {!isUserPortal && path !== '/admin' && <nav className="md:hidden fixed bottom-0 inset-x-0 z-40" style={{background: 'rgba(15,17,10,0.97)', backdropFilter: 'blur(20px)', borderTop: '1px solid rgba(255,255,255,0.08)'}}>
         {/* Safe area spacer for iPhone home indicator */}
         <div className="flex items-center justify-around px-2 pt-2 pb-[env(safe-area-inset-bottom,8px)]">
 
@@ -219,7 +228,7 @@ export default function App() {
 
           {/* Trade — centre CTA */}
           <button
-            onClick={() => currentUser ? openUserDashboard('trade') : openAuth('signup')}
+            onClick={() => currentUser ? openUserDashboard('markets') : openAuth('signup')}
             className="flex flex-col items-center gap-0.5 -mt-5 px-4 py-2 rounded-2xl shadow-[0_0_20px_rgba(109,255,138,0.5)] active:scale-90 transition-all"
             style={{background: 'linear-gradient(135deg,#6dff8a,#3dd68c)', color: '#0f110a'}}
           >
@@ -251,9 +260,9 @@ export default function App() {
           </button>
 
         </div>
-      </nav>
+      </nav>}
       {/* Bottom padding so content isn't hidden behind mobile nav */}
-      <div className="md:hidden h-20" />
+      {!isUserPortal && path !== '/admin' && <div className="md:hidden h-20" />}
 
       <CookieBanner />
 
@@ -267,12 +276,7 @@ export default function App() {
         onOpenPortal={(tab) => { setTradeInstrument(null); openUserDashboard(tab); }}
       />
 
-      <CopyModal
-        investor={copyInvestor}
-        onClose={() => setCopyInvestor(null)}
-        onRequireAuth={() => { setCopyInvestor(null); openAuth('login'); }}
-        onOpenPortal={(tab) => { setCopyInvestor(null); openUserDashboard(tab); }}
-      />
+      {/* CopyTrader lives inside the client dashboard (CopyTrader tab) */}
 
       <AuthModal
         isOpen={authModal.isOpen}
@@ -289,6 +293,7 @@ export default function App() {
           onClose={closePortal}
           initialTab={loc.search.get('tab') || undefined}
           onOpenTrade={handleOpenTradeForSymbol}
+          onOpenAiAssistant={() => setIsAiChatOpen(true)}
         />
       )}
 

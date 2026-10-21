@@ -9,6 +9,9 @@ export interface Instrument {
   avatarBg: string;
   marketCap?: string;
   volume24h?: string;
+  halted?: boolean;
+  status?: string;
+  spread?: string;
 }
 
 export interface PopularInvestor {
@@ -22,6 +25,7 @@ export interface PopularInvestor {
   copiers: number;
   riskScore: number;
   topHoldings: string[];
+  liveChangePercent?: number;
 }
 
 export interface AiSlide {

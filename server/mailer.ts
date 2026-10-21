@@ -10,6 +10,8 @@ export interface MailInput {
   replyTo?: string;
   cta?: { label: string; url: string };
   preheader?: string;
+  otp?: string;          // 6-digit one-time code, rendered as a large box in the email
+  otpMinutes?: number;   // validity shown under the code
 }
 
 export type MailResult = { ok: boolean; provider: string; error?: string };
@@ -77,6 +79,13 @@ export const renderHtml = (m: MailInput) => {
     .split(/\n{2,}/)
     .map(p => `<p style="margin:0 0 14px;line-height:1.6;color:#d8dbd2;font-size:14px;">${p.replace(/\n/g, '<br/>')}</p>`)
     .join('');
+  const otpBox = m.otp
+    ? `<div style="margin:22px 0;padding:20px;background:#10130a;border:1px solid rgba(109,255,138,0.5);border-radius:14px;text-align:center;">
+         <div style="font-size:11px;font-weight:700;color:#a3a89e;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;">Your one-time code</div>
+         <div style="font-size:36px;font-weight:900;letter-spacing:8px;color:#6dff8a;font-family:Courier,monospace;">${escapeHtml(m.otp)}</div>
+         <div style="font-size:11px;color:#868c80;margin-top:8px;">Expires in ${m.otpMinutes || 10} minutes. Never share this code with anyone.</div>
+       </div>`
+    : '';
   const cta = m.cta
     ? `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:22px 0 8px;"><tr><td style="border-radius:999px;background:#6dff8a;">
          <a href="${escapeHtml(m.cta.url)}" style="display:inline-block;padding:12px 26px;font-weight:700;font-size:14px;color:#15170f;text-decoration:none;border-radius:999px;">${escapeHtml(m.cta.label)}</a>
@@ -95,6 +104,7 @@ export const renderHtml = (m: MailInput) => {
     <tr><td style="padding:28px;">
       <h1 style="margin:0 0 18px;font-size:18px;line-height:1.35;color:#ffffff;">${escapeHtml(m.subject)}</h1>
       ${paragraphs}
+      ${otpBox}
       ${cta}
     </td></tr>
     <tr><td style="padding:18px 28px;background:#11130c;border-top:1px solid #2a2e22;font-size:11px;line-height:1.6;color:#868c80;">

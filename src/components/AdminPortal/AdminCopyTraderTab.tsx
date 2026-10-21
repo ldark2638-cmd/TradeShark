@@ -1,24 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { 
-  Plus, 
-  Save, 
-  Trash2, 
-  Eye, 
-  EyeOff, 
-  Users, 
-  TrendingUp, 
-  TrendingDown, 
-  StopCircle, 
-  Pencil, 
-  X, 
-  RotateCcw, 
-  UserCheck, 
-  DollarSign, 
-  Activity, 
-  History,
-  CheckCircle2,
-  AlertCircle
-} from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Plus, Save, Trash2, Eye, EyeOff, Users, Pencil, X, Camera, Link2, StopCircle, Search, RotateCcw } from 'lucide-react';
 import { api, errMsg } from '../../lib/api';
 import { useBrokerage } from '../../context/BrokerageContext';
 
@@ -33,8 +14,8 @@ interface AdminInvestor {
   copiers: number;
   baseCopiers: number;
   riskScore: number;
-  topHoldings: string[];
-  dailyTarget: number | null;
+  topHoldings: string[] | string;
+  dailyTarget: number | null | '';
   active: boolean;
   activeCopies: number;
   liveChangePercent: number;
@@ -42,60 +23,70 @@ interface AdminInvestor {
 }
 
 interface ClosedCopy {
-  id: string;
-  userId: string;
-  userName?: string;
-  userEmail?: string;
-  investorId: string;
-  name: string;
-  handle: string;
-  allocated: number;
-  currentValue: number;
-  profit: number;
-  profitPercent: number;
-  startedDate: string;
-  stoppedDate?: string;
-  stopReason?: string;
+  id: string; userId: string; userName?: string; userEmail?: string; investorId: string; name: string;
+  allocated: number; currentValue: number; profit: number; profitPercent: number; startedDate: string;
+  stoppedDate?: string; stoppedTs?: number; stopReason?: string;
 }
 
 const EMPTY: Partial<AdminInvestor> = {
   name: '', handle: '', avatarUrl: '', role: 'Popular Investor', bio: '', return24M: 30, baseCopiers: 0, riskScore: 4,
-  topHoldings: [], dailyTarget: null, active: true,
+  topHoldings: '', dailyTarget: '', active: true,
 };
 
-const money = (n: number) => `$${(Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const usd = (n: number) => `$${(Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** Crop to a centred square and shrink to 320px so photos stay small (~30 KB) and load fast. */
+function fileToAvatar(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!/^image\//.test(file.type)) return reject(new Error('Choose an image file (JPG, PNG or WebP).'));
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const side = Math.min(img.width, img.height);
+      const size = Math.min(320, side);
+      const c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      const ctx = c.getContext('2d')!;
+      ctx.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', 0.86));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That image could not be read. Try another file.')); };
+    img.src = url;
+  });
+}
+
+const Avatar: React.FC<{ src?: string; name?: string; size?: string }> = ({ src, name = '?', size = 'w-12 h-12' }) => {
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [src]);
+  const initials = name.split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase() || '?';
+  return src && !broken
+    ? <img src={src} alt="" onError={() => setBroken(true)} className={`${size} rounded-2xl object-cover bg-white/5 shrink-0`} />
+    : <div className={`${size} rounded-2xl bg-[#6dff8a]/15 text-[#6dff8a] font-bold flex items-center justify-center shrink-0`}>{initials}</div>;
+};
 
 export const AdminCopyTraderTab: React.FC<{ onNotify: (msg: string) => void }> = ({ onNotify }) => {
   const { copies, users, refresh } = useBrokerage();
-  const [subTab, setSubTab] = useState<'investors' | 'active' | 'assign' | 'history'>('investors');
   const [investors, setInvestors] = useState<AdminInvestor[]>([]);
-  const [closedCopies, setClosedCopies] = useState<ClosedCopy[]>([]);
   const [editing, setEditing] = useState<Partial<AdminInvestor> | null>(null);
   const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [adjust, setAdjust] = useState<Record<string, string>>({});
-
-  // Reset performance modal/state
+  const [view, setView] = useState<'investors' | 'copies' | 'assign' | 'history'>('investors');
+  const [closed, setClosed] = useState<ClosedCopy[]>([]);
   const [resetTarget, setResetTarget] = useState<AdminInvestor | null>(null);
   const [resetPercent, setResetPercent] = useState('0');
-
-  // Assign Copy Form State
-  const [assignUserId, setAssignUserId] = useState('');
-  const [assignInvestorId, setAssignInvestorId] = useState('');
-  const [assignAmount, setAssignAmount] = useState('500');
-  const [assignStopLoss, setAssignStopLoss] = useState('60');
-  const [assignAutoCredit, setAssignAutoCredit] = useState(true);
+  const [assign, setAssign] = useState({ userId: '', investorId: '', amount: '500', stopLoss: '60', autoCredit: false });
   const [assigning, setAssigning] = useState(false);
+  const [q, setQ] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     try {
-      const invRes = await api.get('/api/admin/investors');
-      if (invRes?.investors) setInvestors(invRes.investors);
-
-      const copiesRes = await api.get('/api/admin/copies');
-      if (copiesRes?.closed) setClosedCopies(copiesRes.closed);
-    } catch (e) {
-      onNotify(errMsg(e));
-    }
+      const [inv, cp] = await Promise.all([api.get('/api/admin/investors'), api.get('/api/admin/copies').catch(() => null)]);
+      setInvestors(inv.investors);
+      if (cp?.closed) setClosed(cp.closed);
+    } catch (e) { onNotify(errMsg(e)); }
   }, [onNotify]);
 
   useEffect(() => {
@@ -104,642 +95,355 @@ export const AdminCopyTraderTab: React.FC<{ onNotify: (msg: string) => void }> =
     return () => clearInterval(t);
   }, [load]);
 
-  const saveInvestor = async () => {
-    if (!editing) return;
-    setBusy(true);
-    try {
-      const body = { ...editing, topHoldings: Array.isArray(editing.topHoldings) ? editing.topHoldings : String(editing.topHoldings || '') };
-      const r = editing.id
-        ? await api.put(`/api/admin/investors/${editing.id}`, body)
-        : await api.post('/api/admin/investors', body);
-      setInvestors(r.investors);
-      setEditing(null);
-      onNotify(editing.id ? 'Investor profile updated.' : 'New investor listed.');
-      refresh();
-    } catch (e) {
-      onNotify(errMsg(e));
-    } finally {
-      setBusy(false);
-    }
+  const openEditor = (inv?: AdminInvestor) => {
+    setFormError(null);
+    setEditing(inv ? { ...inv, topHoldings: Array.isArray(inv.topHoldings) ? inv.topHoldings.join(', ') : inv.topHoldings, dailyTarget: inv.dailyTarget ?? '' } : { ...EMPTY });
   };
 
-  const toggleActive = async (inv: AdminInvestor) => {
+  const save = async () => {
+    if (!editing) return;
+    if (!String(editing.name || '').trim()) return setFormError('Enter a name.');
+    setBusy(true);
+    setFormError(null);
+    try {
+      const r = editing.id
+        ? await api.put(`/api/admin/investors/${editing.id}`, editing)
+        : await api.post('/api/admin/investors', editing);
+      setInvestors(r.investors);
+      onNotify(editing.id ? `${editing.name} updated.` : `${editing.name} added.`);
+      setEditing(null);
+      refresh();
+    } catch (e) { setFormError(errMsg(e)); } finally { setBusy(false); }
+  };
+
+  const pickPhoto = async (f?: File) => {
+    if (!f) return;
+    try {
+      const data = await fileToAvatar(f);
+      setEditing(ed => ({ ...ed, avatarUrl: data }));
+    } catch (e) { setFormError(errMsg(e)); }
+  };
+
+  const toggle = async (inv: AdminInvestor) => {
     try {
       const r = await api.put(`/api/admin/investors/${inv.id}`, { active: !inv.active });
       setInvestors(r.investors);
-      onNotify(inv.active ? `${inv.name} hidden from website listings.` : `${inv.name} is now visible on website.`);
-      refresh();
-    } catch (e) {
-      onNotify(errMsg(e));
-    }
+      onNotify(inv.active ? `${inv.name} is hidden from clients.` : `${inv.name} is visible to clients.`);
+    } catch (e) { onNotify(errMsg(e)); }
   };
 
-  const removeInvestor = async (inv: AdminInvestor) => {
-    if (!window.confirm(`Delete ${inv.name}? If there are active client copies, the investor will be hidden instead of deleted.`)) return;
+  const remove = async (inv: AdminInvestor) => {
+    if (!window.confirm(`Remove ${inv.name}?${inv.activeCopies ? ` ${inv.activeCopies} client(s) are copying them, so they'll be hidden instead of deleted.` : ''}`)) return;
     try {
       const r = await api.del(`/api/admin/investors/${inv.id}`);
       setInvestors(r.investors);
-      onNotify(r.hidden ? `${inv.name} has active copiers, so it was hidden instead of deleted.` : `${inv.name} deleted.`);
-      refresh();
-    } catch (e) {
-      onNotify(errMsg(e));
-    }
+      onNotify(r.hidden ? `${inv.name} hidden (clients are still copying).` : `${inv.name} removed.`);
+    } catch (e) { onNotify(errMsg(e)); }
   };
 
-  const handleResetIndex = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!resetTarget) return;
-    try {
-      await api.post(`/api/admin/investors/${resetTarget.id}/reset-index`, { targetPercent: Number(resetPercent) || 0 });
-      onNotify(`Performance for ${resetTarget.name} re-aligned to ${resetPercent}%.`);
-      setResetTarget(null);
-      load();
-      refresh();
-    } catch (err: any) {
-      onNotify(errMsg(err));
-    }
-  };
-
-  const applyAdjust = async (copyId: string, mode: 'percent' | 'amount', overrideVal?: number) => {
-    const v = overrideVal !== undefined ? overrideVal : adjust[copyId];
-    if (v === undefined || v === '') return onNotify('Enter a value first.');
+  const applyAdjust = async (copyId: string, mode: 'percent' | 'amount') => {
+    const v = adjust[copyId];
+    if (v === undefined || v === '' || isNaN(Number(v))) return onNotify('Enter a number first.');
     try {
       await api.post(`/api/admin/copies/${copyId}/adjust`, mode === 'percent' ? { profitPercent: Number(v) } : { amount: Number(v) });
       setAdjust(a => ({ ...a, [copyId]: '' }));
-      onNotify('Copy P&L updated successfully.');
+      onNotify('Copy profit updated.');
       refresh();
-      load();
-    } catch (e) {
-      onNotify(errMsg(e));
-    }
+    } catch (e) { onNotify(errMsg(e)); }
   };
 
-  const forceStop = async (copyId: string, name: string) => {
-    if (!window.confirm(`Close this copy of ${name} and return the liquidated funds to the client's balance?`)) return;
+  const forceStop = async (copyId: string, name: string, client: string) => {
+    if (!window.confirm(`Close ${client}'s copy of ${name} and return the money to their balance?`)) return;
+    try { await api.post(`/api/admin/copies/${copyId}/stop`, {}); onNotify('Copy closed and money returned.'); refresh(); load(); }
+    catch (e) { onNotify(errMsg(e)); }
+  };
+
+  const doReset = async () => {
+    if (!resetTarget) return;
     try {
-      await api.post(`/api/admin/copies/${copyId}/stop`, { reason: 'Closed by portfolio desk management' });
-      onNotify('Copy portfolio closed and balance returned.');
-      refresh();
-      load();
-    } catch (e) {
-      onNotify(errMsg(e));
-    }
+      await api.post(`/api/admin/investors/${resetTarget.id}/reset-index`, { targetPercent: Number(resetPercent) || 0 });
+      onNotify(`${resetTarget.name}'s live performance set to ${Number(resetPercent) || 0}%.`);
+      setResetTarget(null);
+      load(); refresh();
+    } catch (e) { onNotify(errMsg(e)); }
   };
 
-  const handleAssignCopy = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!assignUserId || !assignInvestorId || !assignAmount) {
-      onNotify('Please select a client, investor, and allocation amount');
-      return;
-    }
+  const doAssign = async () => {
+    if (!assign.userId || !assign.investorId || !(Number(assign.amount) > 0)) return onNotify('Choose a client, an investor and an amount.');
     setAssigning(true);
     try {
       await api.post('/api/admin/copies', {
-        userId: assignUserId,
-        investorId: assignInvestorId,
-        amount: Number(assignAmount),
-        stopLossPercent: Number(assignStopLoss) || 60,
-        autoCredit: assignAutoCredit,
+        userId: assign.userId, investorId: assign.investorId, amount: Number(assign.amount),
+        stopLossPercent: Number(assign.stopLoss) || 60, autoCredit: assign.autoCredit,
       });
-      onNotify('Copy trade successfully opened for client!');
-      setAssignUserId('');
-      setAssignInvestorId('');
-      setAssignAmount('500');
-      setSubTab('active');
-      refresh();
-      load();
-    } catch (err: any) {
-      onNotify(errMsg(err));
-    } finally {
-      setAssigning(false);
-    }
+      onNotify(`Copy opened for ${userName(assign.userId)}.`);
+      setAssign(a => ({ ...a, userId: '', investorId: '', amount: '500' }));
+      setView('copies');
+      refresh(); load();
+    } catch (e) { onNotify(errMsg(e)); } finally { setAssigning(false); }
   };
 
   const userName = (id: string) => users.find(u => u.id === id)?.name || id;
+  const shown = investors.filter(i => !q.trim() || `${i.name} ${i.handle}`.toLowerCase().includes(q.trim().toLowerCase()));
 
-  const totalAllocated = copies.reduce((sum, c) => sum + (Number(c.allocated) || 0), 0);
-  const totalValue = copies.reduce((sum, c) => sum + (Number(c.currentValue) || 0), 0);
-  const totalNetProfit = totalValue - totalAllocated;
-
-  const field = (k: keyof AdminInvestor, label: string, type: 'text' | 'number' = 'text', placeholder = '') => (
-    <label className="block text-[11px] text-white/60 space-y-1">
-      <span>{label}</span>
-      <input
-        type={type}
-        step="any"
-        value={k === 'topHoldings' ? (Array.isArray(editing?.topHoldings) ? editing!.topHoldings.join(', ') : (editing?.topHoldings as any) || '') : (editing?.[k] as any) ?? ''}
-        placeholder={placeholder}
-        onChange={e => setEditing(ed => ({ ...ed, [k]: k === 'topHoldings' ? e.target.value : type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value }))}
-        className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/10 text-white text-xs focus:outline-none focus:border-[#6dff8a]"
-      />
-    </label>
-  );
+  const input = 'w-full h-11 px-3 rounded-xl bg-black/30 border border-white/10 text-sm text-white placeholder:text-white/30 focus:border-[#6dff8a]/60 focus:outline-none';
+  const label = 'block text-xs text-white/60 mb-1.5';
 
   return (
-    <div className="space-y-6">
-      {/* OVERVIEW STATS BANNER */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/10">
-          <div className="text-[11px] text-white/50 font-medium">Active Copied Capital</div>
-          <div className="text-base sm:text-lg font-bold font-mono text-white mt-1">{money(totalAllocated)}</div>
-        </div>
-        <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/10">
-          <div className="text-[11px] text-white/50 font-medium">Active Copy Positions</div>
-          <div className="text-base sm:text-lg font-bold font-mono text-[#6dff8a] mt-1">{copies.length}</div>
-        </div>
-        <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/10">
-          <div className="text-[11px] text-white/50 font-medium">Total Unrealized P&amp;L</div>
-          <div className={`text-base sm:text-lg font-bold font-mono mt-1 ${totalNetProfit >= 0 ? 'text-[#6dff8a]' : 'text-red-400'}`}>
-            {totalNetProfit >= 0 ? '+' : ''}{money(totalNetProfit)}
-          </div>
-        </div>
-        <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/10">
-          <div className="text-[11px] text-white/50 font-medium">Popular Investors Listed</div>
-          <div className="text-base sm:text-lg font-bold font-mono text-white mt-1">{investors.length}</div>
-        </div>
-      </div>
-
-      {/* TOP SUBTABS BAR */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
-        <div>
-          <h3 className="text-base font-bold text-white flex items-center gap-2">
-            <Users className="w-5 h-5 text-[#6dff8a]" /> CopyTrader Control Desk
-          </h3>
-          <p className="text-xs text-white/50">Manage popular investor algorithms, active copy allocations, and P&amp;L adjustments.</p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5 bg-white/5 p-1 rounded-xl border border-white/10 text-xs">
-          <button
-            onClick={() => setSubTab('investors')}
-            className={`px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1.5 ${
-              subTab === 'investors' ? 'bg-[#6dff8a] text-[#15170f]' : 'text-white/70 hover:text-white'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>Popular Investors ({investors.length})</span>
-          </button>
-
-          <button
-            onClick={() => setSubTab('active')}
-            className={`px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1.5 ${
-              subTab === 'active' ? 'bg-[#6dff8a] text-[#15170f]' : 'text-white/70 hover:text-white'
-            }`}
-          >
-            <Activity className="w-3.5 h-3.5" />
-            <span>Active Client Copies ({copies.length})</span>
-          </button>
-
-          <button
-            onClick={() => setSubTab('assign')}
-            className={`px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1.5 ${
-              subTab === 'assign' ? 'bg-[#6dff8a] text-[#15170f]' : 'text-white/70 hover:text-white'
-            }`}
-          >
-            <UserCheck className="w-3.5 h-3.5" />
-            <span>Assign Copy for Client</span>
-          </button>
-
-          <button
-            onClick={() => setSubTab('history')}
-            className={`px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1.5 ${
-              subTab === 'history' ? 'bg-[#6dff8a] text-[#15170f]' : 'text-white/70 hover:text-white'
-            }`}
-          >
-            <History className="w-3.5 h-3.5" />
-            <span>Copy History ({closedCopies.length})</span>
-          </button>
-        </div>
-      </div>
-
-      {/* SUBTAB 1: POPULAR INVESTORS */}
-      {subTab === 'investors' && (
-        <div className="space-y-4">
-          <div className="flex justify-end">
-            <button
-              onClick={() => setEditing({ ...EMPTY })}
-              className="px-4 py-2 rounded-lg bg-[#6dff8a] text-[#15170f] text-xs font-bold flex items-center gap-1.5"
-            >
-              <Plus className="w-4 h-4" /> Add Popular Investor
+    <div className="space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex p-1 rounded-xl bg-black/30 border border-white/10 w-full sm:w-auto overflow-x-auto">
+          {([
+            ['investors', 'Investors', investors.length],
+            ['copies', 'Active copies', copies.length],
+            ['assign', 'Assign copy', null],
+            ['history', 'History', closed.length],
+          ] as const).map(([k, l, n]) => (
+            <button key={k} onClick={() => setView(k)} className={`flex-1 sm:flex-none h-9 px-3 sm:px-4 rounded-lg text-sm font-semibold whitespace-nowrap ${view === k ? 'bg-[#6dff8a] text-[#15170f]' : 'text-white/65'}`}>
+              {l}{n !== null && <span className="opacity-70 tabular-nums"> {n}</span>}
             </button>
-          </div>
+          ))}
+        </div>
+        {view === 'investors' && (
+          <button onClick={() => openEditor()} className="h-11 px-4 rounded-xl bg-[#6dff8a] text-[#15170f] text-sm font-bold flex items-center justify-center gap-2">
+            <Plus className="w-4 h-4" /> Add investor
+          </button>
+        )}
+      </div>
 
-          {editing && (
-            <div className="p-4 rounded-2xl border border-[#6dff8a]/30 bg-white/[0.03] space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-bold text-white">{editing.id ? `Edit Investor: ${editing.name}` : 'Create New Popular Investor'}</h4>
-                <button onClick={() => setEditing(null)} className="text-white/50 hover:text-white"><X className="w-4 h-4" /></button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {field('name', 'Name')}
-                {field('handle', 'Handle', 'text', '@handle')}
-                {field('role', 'Badge / Role', 'text', 'Elite Pro Investor')}
-                {field('avatarUrl', 'Photo URL', 'text', 'https://…')}
-                {field('return24M', '24-Month Return %', 'number')}
-                {field('riskScore', 'Risk Score (1-10)', 'number')}
-                {field('baseCopiers', 'Base Copiers (Shown + Real copies)', 'number')}
-                {field('dailyTarget', 'Daily Performance Target % (blank = auto)', 'number', 'e.g. 0.5')}
-                {field('topHoldings', 'Top Holdings (comma separated)', 'text', 'AAPL, MSFT, BTC')}
-              </div>
-              <label className="block text-[11px] text-white/60 space-y-1">
-                <span>Bio / Trading Philosophy</span>
-                <textarea
-                  value={editing.bio || ''}
-                  onChange={e => setEditing(ed => ({ ...ed, bio: e.target.value }))}
-                  rows={3}
-                  className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/10 text-white text-xs focus:outline-none focus:border-[#6dff8a]"
-                />
-              </label>
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-xs text-white/70">
-                  <input
-                    type="checkbox"
-                    checked={editing.active !== false}
-                    onChange={e => setEditing(ed => ({ ...ed, active: e.target.checked }))}
-                  />
-                  <span>Listed publicly on website</span>
-                </label>
-                <button onClick={saveInvestor} disabled={busy} className="px-4 py-2 rounded-lg bg-[#6dff8a] text-[#15170f] text-xs font-bold flex items-center gap-1.5 disabled:opacity-50">
-                  <Save className="w-4 h-4" /> {busy ? 'Saving…' : 'Save Investor Profile'}
-                </button>
-              </div>
-            </div>
+      {view === 'investors' && (
+        <>
+          <p className="text-sm text-white/55">Clients see these investors in their dashboard's CopyTrader tab. Hidden investors stay out of the list but existing copies keep running.</p>
+          {investors.length > 6 && (
+            <label className="relative block">
+              <Search className="w-4 h-4 text-white/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search investors" className={`${input} pl-10`} />
+            </label>
           )}
 
-          {/* Reset Performance Modal */}
-          {resetTarget && (
-            <div className="p-4 rounded-2xl border border-yellow-500/40 bg-yellow-500/5 space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <RotateCcw className="w-4 h-4 text-yellow-400" />
-                  <span>Re-align Performance Index: {resetTarget.name}</span>
-                </h4>
-                <button onClick={() => setResetTarget(null)} className="text-white/50 hover:text-white"><X className="w-4 h-4" /></button>
-              </div>
-              <p className="text-xs text-white/70">
-                Reset or set the live return baseline for this investor. Live return is currently at{' '}
-                <strong className={resetTarget.liveChangePercent >= 0 ? 'text-[#6dff8a]' : 'text-red-400'}>
-                  {resetTarget.liveChangePercent}%
-                </strong>.
-              </p>
-              <form onSubmit={handleResetIndex} className="flex flex-wrap items-center gap-3">
-                <label className="text-xs text-white/70">Set target return %:</label>
-                <input
-                  type="number"
-                  step="any"
-                  value={resetPercent}
-                  onChange={e => setResetPercent(e.target.value)}
-                  placeholder="0"
-                  className="w-24 px-3 py-1.5 rounded-lg bg-black/50 border border-white/15 text-white text-xs"
-                />
-                <button type="submit" className="px-3 py-1.5 rounded-lg bg-yellow-400 text-black font-bold text-xs">
-                  Apply Reset
-                </button>
-                <button type="button" onClick={() => setResetPercent('0')} className="px-2 py-1 rounded bg-white/10 text-white text-xs">
-                  Reset to 0%
-                </button>
-              </form>
+          {investors.length === 0 ? (
+            <div className="p-8 rounded-2xl border border-dashed border-white/15 text-center space-y-3">
+              <p className="text-sm text-white/60">No investors yet. Add the first one so clients have someone to copy.</p>
+              <button onClick={() => openEditor()} className="h-10 px-4 rounded-xl bg-[#6dff8a] text-[#15170f] text-sm font-bold">Add investor</button>
             </div>
-          )}
-
-          <div className="overflow-x-auto rounded-2xl border border-white/10">
-            <table className="w-full text-xs">
-              <thead className="bg-white/5 text-white/50 text-left">
-                <tr>
-                  <th className="p-3">Investor</th>
-                  <th className="p-3">24M Return</th>
-                  <th className="p-3">Live Return</th>
-                  <th className="p-3">Risk</th>
-                  <th className="p-3">Daily Drift</th>
-                  <th className="p-3">Copiers</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {investors.map(inv => (
-                  <tr key={inv.id} className="border-t border-white/5 text-white/80 hover:bg-white/[0.01]">
-                    <td className="p-3">
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
+              {shown.map(inv => (
+                <div key={inv.id} className={`p-4 rounded-2xl border ${inv.active ? 'bg-white/[0.03] border-white/10' : 'bg-white/[0.015] border-dashed border-white/15'} space-y-3`}>
+                  <div className="flex items-start gap-3">
+                    <Avatar src={inv.avatarUrl} name={inv.name} size="w-14 h-14" />
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <img src={inv.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover bg-white/10 shrink-0" />
-                        <div>
-                          <div className="font-semibold text-white">{inv.name}</div>
-                          <div className="text-white/40">{inv.handle}</div>
-                        </div>
+                        <span className="font-semibold text-white truncate">{inv.name}</span>
+                        {!inv.active && <span className="text-[11px] px-1.5 py-0.5 rounded bg-yellow-400/15 text-yellow-300">Hidden</span>}
                       </div>
-                    </td>
-                    <td className="p-3 text-[#6dff8a] font-mono">+{inv.return24M}%</td>
-                    <td className={`p-3 font-mono ${inv.liveChangePercent >= 0 ? 'text-[#6dff8a]' : 'text-red-400'}`}>
-                      {inv.liveChangePercent >= 0 ? <TrendingUp className="inline w-3 h-3" /> : <TrendingDown className="inline w-3 h-3" />} {inv.liveChangePercent}%
-                    </td>
-                    <td className="p-3">{inv.riskScore}/10</td>
-                    <td className="p-3 font-mono text-white/60">
-                      {inv.dailyTarget !== null && inv.dailyTarget !== undefined ? `${inv.dailyTarget}%/day` : 'auto'}
-                    </td>
-                    <td className="p-3 font-mono">{inv.copiers.toLocaleString()}</td>
-                    <td className="p-3">
-                      {inv.active ? (
-                        <span className="px-2 py-0.5 rounded-full bg-[#6dff8a]/20 text-[#6dff8a] text-[10px] font-semibold">Listed</span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full bg-yellow-400/20 text-yellow-400 text-[10px] font-semibold">Hidden</span>
-                      )}
-                    </td>
-                    <td className="p-3 text-right">
-                      <div className="flex justify-end gap-1.5">
-                        <button
-                          title="Re-align / Reset performance index"
-                          onClick={() => { setResetTarget(inv); setResetPercent('0'); }}
-                          className="p-1.5 rounded bg-white/5 hover:bg-white/10 text-yellow-300"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          title="Edit Profile"
-                          onClick={() => setEditing({ ...inv })}
-                          className="p-1.5 rounded bg-white/5 hover:bg-white/10 text-white"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          title={inv.active ? 'Hide from website' : 'Make visible'}
-                          onClick={() => toggleActive(inv)}
-                          className="p-1.5 rounded bg-white/5 hover:bg-white/10 text-white/70"
-                        >
-                          {inv.active ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                        </button>
-                        <button
-                          title="Delete Investor"
-                          onClick={() => removeInvestor(inv)}
-                          className="p-1.5 rounded bg-white/5 hover:bg-red-500/20 text-red-400"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                      <div className="text-xs text-white/50 truncate">{inv.handle} · {inv.role}</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    {[
+                      ['2-yr', `${inv.return24M >= 0 ? '+' : ''}${inv.return24M}%`, inv.return24M >= 0 ? 'text-[#6dff8a]' : 'text-[#ff7a7a]'],
+                      ['Live', `${inv.liveChangePercent >= 0 ? '+' : ''}${inv.liveChangePercent}%`, inv.liveChangePercent >= 0 ? 'text-[#6dff8a]' : 'text-[#ff7a7a]'],
+                      ['Risk', `${inv.riskScore}/10`, 'text-white'],
+                      ['Copiers', inv.copiers.toLocaleString(), 'text-white'],
+                    ].map(([l, v, c]) => (
+                      <div key={l} className="py-2 rounded-xl bg-black/25">
+                        <div className={`text-sm font-bold tabular-nums ${c}`}>{v}</div>
+                        <div className="text-[10px] text-white/45">{l}</div>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => openEditor(inv)} className="flex-1 h-10 rounded-xl bg-white/5 hover:bg-white/10 text-sm font-semibold text-white flex items-center justify-center gap-1.5"><Pencil className="w-4 h-4" /> Edit</button>
+                    <button onClick={() => { setResetTarget(inv); setResetPercent('0'); }} className="h-10 w-11 rounded-xl bg-white/5 hover:bg-white/10 text-white/80 flex items-center justify-center" title="Set live performance" aria-label="Set live performance"><RotateCcw className="w-4 h-4" /></button>
+                    <button onClick={() => toggle(inv)} className="h-10 w-11 rounded-xl bg-white/5 hover:bg-white/10 text-white/80 flex items-center justify-center" title={inv.active ? 'Hide from clients' : 'Show to clients'} aria-label={inv.active ? 'Hide from clients' : 'Show to clients'}>
+                      {inv.active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                    <button onClick={() => remove(inv)} className="h-10 w-11 rounded-xl bg-[#ff5c5c]/10 hover:bg-[#ff5c5c]/20 text-[#ff7a7a] flex items-center justify-center" title="Remove" aria-label="Remove investor"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {view === 'copies' && (
+        copies.length === 0 ? (
+          <div className="p-8 rounded-2xl border border-dashed border-white/15 text-center text-sm text-white/55">No client is copying an investor right now.</div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {copies.map(c => {
+              const inv = investors.find(i => i.id === String(c.investorId));
+              const client = userName(c.userId);
+              return (
+                <div key={c.id} className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <Avatar src={inv?.avatarUrl} name={c.name} size="w-11 h-11" />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-white truncate">{client}</div>
+                      <div className="text-xs text-white/50 truncate">copying {c.name} · {c.userId}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-bold text-white tabular-nums">{usd(c.currentValue)}</div>
+                      <div className={`text-xs font-semibold tabular-nums ${c.profit >= 0 ? 'text-[#6dff8a]' : 'text-[#ff7a7a]'}`}>{c.profit >= 0 ? '+' : '−'}{usd(Math.abs(c.profit))} ({c.profitPercent}%)</div>
+                    </div>
+                  </div>
+                  <div className="text-xs text-white/50 tabular-nums">Invested {usd(c.allocated)} · since {c.startedDate}</div>
+                  <div className="flex gap-2">
+                    <input
+                      value={adjust[c.id] || ''}
+                      onChange={e => setAdjust(a => ({ ...a, [c.id]: e.target.value }))}
+                      inputMode="decimal"
+                      placeholder="e.g. 12.5 or -200"
+                      aria-label="Adjustment value"
+                      className="flex-1 min-w-0 h-10 px-3 rounded-xl bg-black/30 border border-white/10 text-sm text-white placeholder:text-white/30"
+                    />
+                    <button onClick={() => applyAdjust(c.id, 'percent')} className="h-10 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-semibold text-white" title="Set total profit to this %">Set %</button>
+                    <button onClick={() => applyAdjust(c.id, 'amount')} className="h-10 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-semibold text-white" title="Add or subtract this dollar amount">± $</button>
+                    <button onClick={() => forceStop(c.id, c.name, client)} className="h-10 w-10 rounded-xl bg-[#ff5c5c]/10 hover:bg-[#ff5c5c]/20 text-[#ff7a7a] flex items-center justify-center" title="Close copy" aria-label="Close copy"><StopCircle className="w-4 h-4" /></button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {view === 'assign' && (
+        <div className="max-w-xl space-y-4 p-4 sm:p-5 rounded-2xl bg-white/[0.03] border border-white/10">
+          <p className="text-sm text-white/60">Open a copy for a client yourself. The amount comes out of their balance, unless you tick "credit the amount first".</p>
+          <div>
+            <label className={label} htmlFor="as-user">Client</label>
+            <select id="as-user" className={input} value={assign.userId} onChange={e => setAssign(a => ({ ...a, userId: e.target.value }))}>
+              <option value="">Choose a client</option>
+              {users.map(u => <option key={u.id} value={u.id}>{u.name} · ${u.realBalance.toLocaleString()} ({u.id})</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={label} htmlFor="as-inv">Investor</label>
+            <select id="as-inv" className={input} value={assign.investorId} onChange={e => setAssign(a => ({ ...a, investorId: e.target.value }))}>
+              <option value="">Choose an investor</option>
+              {investors.map(i => <option key={i.id} value={i.id}>{i.name} ({i.handle}){i.active ? '' : ' · hidden'}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={label} htmlFor="as-amt">Amount ($)</label><input id="as-amt" type="number" inputMode="decimal" className={input} value={assign.amount} onChange={e => setAssign(a => ({ ...a, amount: e.target.value }))} /></div>
+            <div><label className={label} htmlFor="as-sl">Stop if loss reaches (%)</label><input id="as-sl" type="number" inputMode="numeric" className={input} value={assign.stopLoss} onChange={e => setAssign(a => ({ ...a, stopLoss: e.target.value }))} /></div>
+          </div>
+          <label className="flex items-center gap-3 p-3 rounded-xl bg-black/20 cursor-pointer">
+            <input type="checkbox" checked={assign.autoCredit} onChange={e => setAssign(a => ({ ...a, autoCredit: e.target.checked }))} className="w-4 h-4 accent-[#6dff8a]" />
+            <span className="text-sm text-white/80">Credit the amount to the client first</span>
+          </label>
+          <button onClick={doAssign} disabled={assigning} className="w-full h-11 rounded-xl bg-[#6dff8a] text-[#15170f] text-sm font-bold disabled:opacity-50">{assigning ? 'Opening…' : 'Open copy'}</button>
+        </div>
+      )}
+
+      {view === 'history' && (
+        closed.length === 0 ? (
+          <div className="p-8 rounded-2xl border border-dashed border-white/15 text-center text-sm text-white/55">No copies have been closed yet.</div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {closed.map(c => (
+              <div key={c.id} className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 flex items-center gap-3">
+                <Avatar src={investors.find(i => i.id === String(c.investorId))?.avatarUrl} name={c.name} size="w-11 h-11" />
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-white truncate">{c.userName || userName(c.userId)}</div>
+                  <div className="text-xs text-white/50 truncate">copied {c.name} · {c.startedDate}{c.stoppedTs ? ` → ${new Date(c.stoppedTs).toISOString().slice(0, 10)}` : ''}</div>
+                  {c.stopReason && <div className="text-[11px] text-white/40 truncate">{c.stopReason}</div>}
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="font-bold text-white tabular-nums">{usd(c.currentValue)}</div>
+                  <div className={`text-xs font-semibold tabular-nums ${c.profit >= 0 ? 'text-[#6dff8a]' : 'text-[#ff7a7a]'}`}>{c.profit >= 0 ? '+' : '−'}{usd(Math.abs(c.profit))} ({c.profitPercent}%)</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {resetTarget && (
+        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setResetTarget(null)}>
+          <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-sm bg-[#171a10] border-t sm:border border-white/10 rounded-t-3xl sm:rounded-3xl p-5 space-y-4 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+            <h3 className="text-base font-bold text-white">Set {resetTarget.name}'s live performance</h3>
+            <p className="text-sm text-white/60">Now {resetTarget.liveChangePercent >= 0 ? '+' : ''}{resetTarget.liveChangePercent}%. Every client copying them moves with this number.</p>
+            <div><label className={label} htmlFor="rs-pct">New live performance (%)</label><input id="rs-pct" type="number" step="any" inputMode="decimal" className={input} value={resetPercent} onChange={e => setResetPercent(e.target.value)} /></div>
+            <div className="flex gap-2">
+              <button onClick={() => setResetTarget(null)} className="flex-1 h-11 rounded-xl bg-white/5 text-sm font-semibold text-white">Cancel</button>
+              <button onClick={doReset} className="flex-1 h-11 rounded-xl bg-[#6dff8a] text-[#15170f] text-sm font-bold">Save</button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* SUBTAB 2: ACTIVE CLIENT COPIES */}
-      {subTab === 'active' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-bold text-white">Active Client Portfolio Allocations ({copies.length})</h4>
-            <button
-              onClick={() => setSubTab('assign')}
-              className="px-3 py-1.5 rounded-lg bg-[#6dff8a] text-[#15170f] font-bold text-xs flex items-center gap-1.5"
-            >
-              <UserCheck className="w-3.5 h-3.5" /> Start Copy for Client
-            </button>
-          </div>
+      {/* Editor: bottom sheet on phones, dialog on desktop */}
+      {editing && (
+        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm animate-fadeIn" onClick={() => !busy && setEditing(null)}>
+          <div onClick={e => e.stopPropagation()} className="w-full sm:max-w-2xl max-h-[94vh] overflow-y-auto bg-[#171a10] border-t sm:border border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl">
+            <div className="sticky top-0 z-10 bg-[#171a10] px-5 py-4 border-b border-white/10 flex items-center justify-between">
+              <h3 className="text-base font-bold text-white">{editing.id ? `Edit ${editing.name}` : 'Add investor'}</h3>
+              <button onClick={() => setEditing(null)} className="p-2 -m-2 rounded-full text-white/60 hover:text-white hover:bg-white/10" aria-label="Close"><X className="w-5 h-5" /></button>
+            </div>
 
-          {copies.length === 0 ? (
-            <div className="p-8 rounded-2xl border border-white/10 bg-white/[0.02] text-center space-y-2">
-              <p className="text-sm text-white/60">No active client copy trades at this time.</p>
-              <button
-                onClick={() => setSubTab('assign')}
-                className="px-4 py-2 rounded-lg bg-[#6dff8a] text-[#15170f] text-xs font-bold inline-flex items-center gap-1.5"
-              >
-                <Plus className="w-4 h-4" /> Allocate Copy Portfolio Now
+            <div className="p-5 space-y-5">
+              <div className="flex items-center gap-4">
+                <Avatar src={editing.avatarUrl} name={editing.name || '?'} size="w-20 h-20" />
+                <div className="flex-1 space-y-2">
+                  <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { pickPhoto(e.target.files?.[0]); e.target.value = ''; }} />
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => fileRef.current?.click()} className="h-10 px-4 rounded-xl bg-white text-[#15170f] text-sm font-semibold flex items-center gap-2"><Camera className="w-4 h-4" /> {editing.avatarUrl ? 'Change photo' : 'Upload photo'}</button>
+                    {editing.avatarUrl && <button onClick={() => setEditing(ed => ({ ...ed, avatarUrl: '' }))} className="h-10 px-3 rounded-xl bg-white/5 text-sm text-white/75">Remove</button>}
+                  </div>
+                  <p className="text-[11px] text-white/45">Square crop, resized automatically.</p>
+                </div>
+              </div>
+
+              <details className="group">
+                <summary className="text-xs text-white/55 cursor-pointer flex items-center gap-1.5 select-none"><Link2 className="w-3.5 h-3.5" /> Or paste a photo link</summary>
+                <input
+                  value={String(editing.avatarUrl || '').startsWith('data:') ? '' : editing.avatarUrl || ''}
+                  onChange={e => setEditing(ed => ({ ...ed, avatarUrl: e.target.value }))}
+                  placeholder="https://…"
+                  className={`${input} mt-2`}
+                />
+              </details>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div><label className={label} htmlFor="inv-name">Name</label><input id="inv-name" className={input} value={editing.name || ''} onChange={e => setEditing(ed => ({ ...ed, name: e.target.value }))} /></div>
+                <div><label className={label} htmlFor="inv-handle">Handle</label><input id="inv-handle" className={input} placeholder="@handle" value={editing.handle || ''} onChange={e => setEditing(ed => ({ ...ed, handle: e.target.value }))} /></div>
+                <div className="sm:col-span-2"><label className={label} htmlFor="inv-role">Title shown under the name</label><input id="inv-role" className={input} placeholder="Elite Pro Investor" value={editing.role || ''} onChange={e => setEditing(ed => ({ ...ed, role: e.target.value }))} /></div>
+              </div>
+
+              <div>
+                <label className={label} htmlFor="inv-bio">Bio</label>
+                <textarea id="inv-bio" rows={3} value={editing.bio || ''} onChange={e => setEditing(ed => ({ ...ed, bio: e.target.value }))} className="w-full px-3 py-2.5 rounded-xl bg-black/30 border border-white/10 text-sm text-white focus:border-[#6dff8a]/60 focus:outline-none" />
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div><label className={label} htmlFor="inv-ret">2-year return %</label><input id="inv-ret" type="number" step="any" inputMode="decimal" className={input} value={editing.return24M ?? ''} onChange={e => setEditing(ed => ({ ...ed, return24M: e.target.value as any }))} /></div>
+                <div><label className={label} htmlFor="inv-risk">Risk (1–10)</label><input id="inv-risk" type="number" min={1} max={10} inputMode="numeric" className={input} value={editing.riskScore ?? ''} onChange={e => setEditing(ed => ({ ...ed, riskScore: e.target.value as any }))} /></div>
+                <div><label className={label} htmlFor="inv-cop">Base copiers</label><input id="inv-cop" type="number" min={0} inputMode="numeric" className={input} value={editing.baseCopiers ?? ''} onChange={e => setEditing(ed => ({ ...ed, baseCopiers: e.target.value as any }))} /></div>
+                <div><label className={label} htmlFor="inv-daily">Daily move %</label><input id="inv-daily" type="number" step="any" inputMode="decimal" placeholder="Auto" className={input} value={editing.dailyTarget ?? ''} onChange={e => setEditing(ed => ({ ...ed, dailyTarget: e.target.value as any }))} /></div>
+              </div>
+              <p className="text-[11px] text-white/45 -mt-2">Copiers shown = base copiers + real client copies. Daily move sets how fast copies grow (e.g. 0.4 = +0.4% a day); leave blank to follow the 2-year return.</p>
+
+              <div><label className={label} htmlFor="inv-hold">Top holdings</label><input id="inv-hold" className={input} placeholder="AAPL, MSFT, BTC" value={String(editing.topHoldings || '')} onChange={e => setEditing(ed => ({ ...ed, topHoldings: e.target.value }))} /></div>
+
+              <label className="flex items-center gap-3 p-3 rounded-xl bg-black/20 cursor-pointer">
+                <input type="checkbox" checked={editing.active !== false} onChange={e => setEditing(ed => ({ ...ed, active: e.target.checked }))} className="w-4 h-4 accent-[#6dff8a]" />
+                <span className="text-sm text-white/80">Show to clients</span>
+              </label>
+
+              {formError && <div className="p-3 rounded-xl bg-[#ff5c5c]/10 border border-[#ff5c5c]/30 text-sm text-[#ffb3b3]">{formError}</div>}
+            </div>
+
+            <div className="sticky bottom-0 bg-[#171a10] px-5 py-4 border-t border-white/10 flex gap-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              <button onClick={() => setEditing(null)} className="flex-1 sm:flex-none h-11 px-5 rounded-xl bg-white/5 text-sm font-semibold text-white">Cancel</button>
+              <button onClick={save} disabled={busy} className="flex-1 h-11 px-5 rounded-xl bg-[#6dff8a] text-[#15170f] text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50">
+                <Save className="w-4 h-4" /> {busy ? 'Saving…' : editing.id ? 'Save changes' : 'Add investor'}
               </button>
             </div>
-          ) : (
-            <div className="overflow-x-auto rounded-2xl border border-white/10">
-              <table className="w-full text-xs">
-                <thead className="bg-white/5 text-white/50 text-left">
-                  <tr>
-                    <th className="p-3">Client Trader</th>
-                    <th className="p-3">Following Investor</th>
-                    <th className="p-3">Allocated</th>
-                    <th className="p-3">Live Value</th>
-                    <th className="p-3">Live P&amp;L</th>
-                    <th className="p-3">P&amp;L Control</th>
-                    <th className="p-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {copies.map(c => (
-                    <tr key={c.id} className="border-t border-white/5 text-white/80 hover:bg-white/[0.01]">
-                      <td className="p-3">
-                        <div className="font-semibold text-white">{userName(c.userId)}</div>
-                        <div className="text-white/40 text-[10px] font-mono">{c.userId}</div>
-                      </td>
-                      <td className="p-3 font-semibold text-white">
-                        {c.name}
-                        <div className="text-white/40 text-[10px]">{c.handle}</div>
-                      </td>
-                      <td className="p-3 font-mono">{money(c.allocated)}</td>
-                      <td className="p-3 font-mono font-bold text-white">{money(c.currentValue)}</td>
-                      <td className={`p-3 font-mono font-bold ${c.profit >= 0 ? 'text-[#6dff8a]' : 'text-red-400'}`}>
-                        {c.profit >= 0 ? '+' : ''}{money(c.profit)} ({c.profitPercent}%)
-                      </td>
-                      <td className="p-3">
-                        <div className="space-y-1.5">
-                          <div className="flex gap-1 items-center">
-                            <input
-                              value={adjust[c.id] || ''}
-                              onChange={e => setAdjust(a => ({ ...a, [c.id]: e.target.value }))}
-                              placeholder="e.g. 15 or 250"
-                              className="w-24 px-2 py-1 rounded bg-black/40 border border-white/10 text-white text-xs"
-                            />
-                            <button
-                              onClick={() => applyAdjust(c.id, 'percent')}
-                              className="px-2 py-1 rounded bg-[#6dff8a]/20 hover:bg-[#6dff8a]/30 text-[#6dff8a] font-semibold text-[11px]"
-                              title="Set total P&L to exact %"
-                            >
-                              Set %
-                            </button>
-                            <button
-                              onClick={() => applyAdjust(c.id, 'amount')}
-                              className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-white text-[11px]"
-                              title="Add or subtract cash amount"
-                            >
-                              ± $
-                            </button>
-                          </div>
-                          {/* Quick presets */}
-                          <div className="flex gap-1 text-[10px]">
-                            <button onClick={() => applyAdjust(c.id, 'percent', 10)} className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-[#6dff8a]">+10%</button>
-                            <button onClick={() => applyAdjust(c.id, 'percent', 25)} className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-[#6dff8a]">+25%</button>
-                            <button onClick={() => applyAdjust(c.id, 'percent', -10)} className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-red-400">-10%</button>
-                            <button onClick={() => applyAdjust(c.id, 'percent', 0)} className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-white/50">0%</button>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-3 text-right">
-                        <button
-                          onClick={() => forceStop(c.id, c.name)}
-                          className="px-2.5 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 font-semibold inline-flex items-center gap-1"
-                          title="Liquidate copy and credit funds"
-                        >
-                          <StopCircle className="w-3.5 h-3.5" />
-                          <span>Close Copy</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* SUBTAB 3: ASSIGN COPY TRADE FOR CLIENT */}
-      {subTab === 'assign' && (
-        <div className="max-w-2xl bg-white/[0.03] border border-white/10 rounded-2xl p-5 space-y-4">
-          <h4 className="text-sm font-bold text-white flex items-center gap-2">
-            <UserCheck className="w-4 h-4 text-[#6dff8a]" />
-            <span>Assign Portfolio Copy to Client</span>
-          </h4>
-          <p className="text-xs text-white/60">
-            Open an active copy portfolio directly on behalf of a registered trader.
-          </p>
-
-          <form onSubmit={handleAssignCopy} className="space-y-4">
-            <div>
-              <label className="text-xs font-semibold text-white/70 block mb-1">Select Client Account *</label>
-              <select
-                required
-                value={assignUserId}
-                onChange={e => setAssignUserId(e.target.value)}
-                className="w-full bg-black/50 border border-white/15 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#6dff8a]"
-              >
-                <option value="">-- Choose trader account --</option>
-                {users.map(u => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.email}) — Balance: ${u.realBalance.toLocaleString()}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-white/70 block mb-1">Select Popular Investor to Copy *</label>
-              <select
-                required
-                value={assignInvestorId}
-                onChange={e => setAssignInvestorId(e.target.value)}
-                className="w-full bg-black/50 border border-white/15 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#6dff8a]"
-              >
-                <option value="">-- Choose popular investor --</option>
-                {investors.map(inv => (
-                  <option key={inv.id} value={inv.id}>
-                    {inv.name} ({inv.handle}) — 24M: +{inv.return24M}% • Risk: {inv.riskScore}/10
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-semibold text-white/70 block mb-1">Allocation Capital ($) *</label>
-                <input
-                  type="number"
-                  step="any"
-                  min="1"
-                  required
-                  value={assignAmount}
-                  onChange={e => setAssignAmount(e.target.value)}
-                  className="w-full bg-black/50 border border-white/15 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#6dff8a]"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-white/70 block mb-1">Stop-Loss Threshold (%)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="99"
-                  value={assignStopLoss}
-                  onChange={e => setAssignStopLoss(e.target.value)}
-                  className="w-full bg-black/50 border border-white/15 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#6dff8a]"
-                />
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl bg-black/40 border border-white/10 space-y-2">
-              <label className="flex items-center gap-2 text-xs text-white cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={assignAutoCredit}
-                  onChange={e => setAssignAutoCredit(e.target.checked)}
-                  className="rounded text-[#6dff8a] focus:ring-0"
-                />
-                <span>Auto-credit client balance if balance is insufficient</span>
-              </label>
-              <p className="text-[11px] text-white/40 pl-5">
-                If the client doesn't have enough available funds, this will automatically credit the difference via Admin Credit and allocate the copy.
-              </p>
-            </div>
-
-            <button
-              type="submit"
-              disabled={assigning}
-              className="px-5 py-2.5 rounded-xl bg-[#6dff8a] text-[#15170f] font-bold text-xs flex items-center gap-2 disabled:opacity-50"
-            >
-              <UserCheck className="w-4 h-4" />
-              <span>{assigning ? 'Allocating Copy Trade...' : 'Start Copy Trade for Client'}</span>
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* SUBTAB 4: CLOSED COPIES HISTORY */}
-      {subTab === 'history' && (
-        <div className="space-y-4">
-          <h4 className="text-sm font-bold text-white">Closed Copy Positions History ({closedCopies.length})</h4>
-
-          {closedCopies.length === 0 ? (
-            <div className="p-8 rounded-2xl border border-white/10 bg-white/[0.02] text-center text-white/50 text-xs">
-              No closed copy positions recorded yet.
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-2xl border border-white/10">
-              <table className="w-full text-xs">
-                <thead className="bg-white/5 text-white/50 text-left">
-                  <tr>
-                    <th className="p-3">Client Trader</th>
-                    <th className="p-3">Investor</th>
-                    <th className="p-3">Allocated</th>
-                    <th className="p-3">Final Value</th>
-                    <th className="p-3">Realized P&amp;L</th>
-                    <th className="p-3">Date Closed</th>
-                    <th className="p-3">Status / Reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {closedCopies.map(c => (
-                    <tr key={c.id} className="border-t border-white/5 text-white/80 hover:bg-white/[0.01]">
-                      <td className="p-3">
-                        <div className="font-semibold text-white">{c.userName || c.userId}</div>
-                        <div className="text-white/40 text-[10px]">{c.userEmail || c.userId}</div>
-                      </td>
-                      <td className="p-3 font-semibold text-white">
-                        {c.name}
-                        <div className="text-white/40 text-[10px]">{c.handle}</div>
-                      </td>
-                      <td className="p-3 font-mono">{money(c.allocated)}</td>
-                      <td className="p-3 font-mono font-bold text-white">{money(c.currentValue)}</td>
-                      <td className={`p-3 font-mono font-bold ${c.profit >= 0 ? 'text-[#6dff8a]' : 'text-red-400'}`}>
-                        {c.profit >= 0 ? '+' : ''}{money(c.profit)} ({c.profitPercent}%)
-                      </td>
-                      <td className="p-3 text-white/50 font-mono text-[11px]">
-                        {c.stoppedDate || c.startedDate}
-                      </td>
-                      <td className="p-3">
-                        <span className="px-2 py-0.5 rounded bg-white/10 text-white/70 text-[10px]">
-                          {c.stopReason || 'Closed'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          </div>
         </div>
       )}
     </div>

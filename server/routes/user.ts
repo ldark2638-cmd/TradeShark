@@ -2,6 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { db, newId } from '../db';
 import { requireUser } from '../auth';
+import { listInvestors } from '../copytrader';
 import {
   userState, submitDeposit, submitWithdrawal, submitKyc, createMessage, markMessageRead,
   openPosition, closePosition, startCopy, stopCopy, HttpError, audit,
@@ -29,6 +30,12 @@ const wrap = (fn: (req: any, res: any) => Promise<any>) => (req: any, res: any) 
 const fresh = (req: any) => db.get<any>('users', req.user.id);
 
 userRouter.get('/state', (req: any, res) => res.json(userState(req.user.id)));
+
+// CopyTrader investors are only visible to signed-in clients.
+userRouter.get('/investors', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ investors: listInvestors(), time: Date.now() });
+});
 
 userRouter.post('/deposits', wrap(async (req, res) => {
   const { amount, method, note } = req.body || {};

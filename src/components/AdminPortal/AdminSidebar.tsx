@@ -31,6 +31,8 @@ interface AdminSidebarProps {
   onLogout?: () => void;
   onSwitchToUserPortal?: () => void;
   onClose: () => void;
+  isMobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 export const AdminSidebar: React.FC<AdminSidebarProps> = ({
@@ -43,7 +45,9 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
   adminSession,
   onLogout,
   onSwitchToUserPortal,
-  onClose
+  onClose,
+  isMobileOpen = false,
+  onCloseMobile,
 }) => {
   const [copiedLink, setCopiedLink] = React.useState(false);
 
@@ -139,8 +143,8 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
     return acc;
   }, {} as Record<string, typeof navItems>);
 
-  return (
-    <aside className="w-64 sm:w-72 bg-[#12140c] border-r border-white/10 flex flex-col h-full select-none shrink-0">
+  const content = (
+    <>
       {/* Brand & Portal Type Header */}
       <div className="p-4 sm:p-5 border-b border-white/10">
         <div className="flex items-center justify-between">
@@ -156,7 +160,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       </div>
 
       {/* Direct Link Info & Quick Action */}
-      <div className="p-3 mx-3 mt-3 rounded-xl bg-white/[0.03] border border-white/5 text-xs space-y-2">
+      <div className="hidden lg:block p-3 mx-3 mt-3 rounded-xl bg-white/[0.03] border border-white/5 text-xs space-y-2">
         <div className="flex items-center justify-between text-[11px] text-white/60">
           <span>Direct Admin Link:</span>
           <span className="font-mono text-[#6dff8a] font-bold">/#admin</span>
@@ -191,7 +195,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
               return (
                 <button
                   key={item.id}
-                  onClick={() => onSelectTab(item.id)}
+                  onClick={() => { onSelectTab(item.id); onCloseMobile?.(); }}
                   className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-medium transition-all ${
                     isActive
                       ? 'bg-[#6dff8a]/15 text-[#6dff8a] border border-[#6dff8a]/30 font-bold shadow-sm'
@@ -269,6 +273,24 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           <span className="text-[10px] font-mono text-white/40">/#home</span>
         </button>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      <aside className="hidden lg:flex w-72 bg-[#12140c] border-r border-white/10 flex-col h-full select-none shrink-0">
+        {content}
+      </aside>
+      {isMobileOpen && (
+        <div className="lg:hidden fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex animate-fadeIn" onClick={onCloseMobile}>
+          <aside
+            className="w-[19rem] max-w-[86vw] h-full bg-[#12140c] border-r border-white/15 flex flex-col overflow-y-auto select-none shadow-2xl pt-[env(safe-area-inset-top)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {content}
+          </aside>
+        </div>
+      )}
+    </>
   );
 };

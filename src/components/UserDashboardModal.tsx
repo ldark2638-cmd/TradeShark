@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   X, 
   Wallet, 
@@ -24,7 +24,10 @@ import {
   Copy,
   Check,
   ShieldAlert,
-  LogOut
+  LogOut,
+  Search,
+  BarChart3,
+  Zap
 } from 'lucide-react';
 import { TradeSharkLogo } from './TradeSharkLogo';
 import { useBrokerage } from '../context/BrokerageContext';
@@ -33,6 +36,8 @@ import { UserSidebar, UserTab } from './UserPortal/UserSidebar';
 import { UserKycTab } from './UserPortal/UserKycTab';
 import { UserInboxTab } from './UserPortal/UserInboxTab';
 import { UserLoginGate } from './UserPortal/UserLoginGate';
+import { UserCopyTraderTab } from './UserPortal/UserCopyTraderTab';
+import { UserBottomNav } from './UserPortal/UserBottomNav';
 import { errMsg } from '../lib/api';
 
 interface UserDashboardModalProps {
@@ -41,7 +46,13 @@ interface UserDashboardModalProps {
   initialTab?: string;
   onOpenTrade: (symbol: string) => void;
   onOpenAdminPortal?: () => void;
+  onOpenAiAssistant?: () => void;
 }
+
+const SHORT_TITLES: Record<string, string> = {
+  portfolio: 'Home', positions: 'Positions', markets: 'Markets', deposit: 'Deposit', withdraw: 'Withdraw',
+  kyc: 'Verification', inbox: 'Inbox', copy: 'CopyTrader', history: 'History', settings: 'Settings', ai: 'Shark AI',
+};
 
 const TAB_IDS: UserTab[] = ['portfolio', 'positions', 'markets', 'deposit', 'withdraw', 'kyc', 'inbox', 'copy', 'history', 'settings'];
 
@@ -62,7 +73,8 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
   onClose,
   initialTab,
   onOpenTrade,
-  onOpenAdminPortal
+  onOpenAdminPortal,
+  onOpenAiAssistant
 }) => {
   const {
     currentUser: maybeUser,
@@ -95,6 +107,7 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
   React.useEffect(() => { if (initialTab && TAB_IDS.includes(initialTab as UserTab)) setActiveTab(initialTab as UserTab); }, [initialTab]);
   const [accountType, setAccountType] = useState<'real' | 'virtual'>('real');
   const [copiedLink, setCopiedLink] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   
   // Deposit form state
   const [depositAmount, setDepositAmount] = useState(String(Math.max(config.minDeposit, 1000)));
@@ -180,15 +193,15 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-1 sm:p-4 bg-black/90 backdrop-blur-md animate-fadeIn">
+    <div className="fixed inset-0 z-50 flex items-stretch md:items-center justify-center md:p-4 bg-black/90 backdrop-blur-md animate-fadeIn">
       <div 
-        className="w-full max-w-7xl h-[94vh] bg-[#14170e] border border-white/15 rounded-3xl shadow-2xl flex overflow-hidden text-left"
+        className="w-full md:max-w-7xl h-[100dvh] md:h-[94vh] bg-[#14170e] md:border border-white/15 md:rounded-3xl shadow-2xl flex overflow-hidden text-left"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Dedicated Sidebar for All Options */}
         <UserSidebar
           activeTab={activeTab}
-          onSelectTab={setActiveTab}
+          onSelectTab={(tab) => { setActiveTab(tab); setIsMobileSidebarOpen(false); }}
           currentUser={currentUser}
           accountType={accountType}
           onToggleAccountType={setAccountType}
@@ -197,23 +210,35 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
           onOpenAdminPortal={onOpenAdminPortal}
           onLogout={handleLogout}
           onClose={onClose}
+          isMobileOpen={isMobileSidebarOpen}
+          onCloseMobile={() => setIsMobileSidebarOpen(false)}
+          onOpenAiAssistant={onOpenAiAssistant}
         />
 
         {/* Right Main Body Content */}
         <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#15170f]">
           {/* Header Bar */}
-          <div className="p-4 sm:p-5 border-b border-white/10 bg-[#171a10] flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-bold text-white">
-                  {tabTitles[activeTab]?.title || 'Client Portal'}
-                </h2>
-                <span className="text-[10px] bg-[#6dff8a]/20 text-[#6dff8a] font-mono px-2 py-0.5 rounded font-bold uppercase">
-                  /dashboard
-                </span>
-              </div>
-              <p className="text-xs text-[#a3a89e]">
+          <div className="px-3 py-2.5 sm:p-5 border-b border-white/10 bg-[#171a10] flex items-center justify-between gap-2 pt-[max(0.625rem,env(safe-area-inset-top))] md:pt-5">
+            {/* Mobile sidebar toggle */}
+            <button
+              className="hidden"
+              onClick={() => setIsMobileSidebarOpen(true)}
+              aria-label="Open navigation menu"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <div className="flex-1 min-w-0">
+              <h2 className="text-base sm:text-lg font-bold text-white truncate">
+                <span className="md:hidden">{SHORT_TITLES[activeTab] || 'Client portal'}</span>
+                <span className="hidden md:inline">{tabTitles[activeTab]?.title || 'Client Portal'}</span>
+              </h2>
+              <p className="hidden md:block text-xs text-[#a3a89e] truncate">
                 {tabTitles[activeTab]?.subtitle || 'TradeShark Client Portal'}
+              </p>
+              <p className="md:hidden text-xs text-white/55 tabular-nums truncate">
+                {accountType === 'real' ? 'Cash' : 'Practice'} ${activeBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </div>
 
@@ -251,7 +276,7 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
               {/* Sign Out Button */}
               <button
                 onClick={handleLogout}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/25 text-xs font-semibold transition-colors"
+                className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/25 text-xs font-semibold transition-colors"
                 title="Sign out of trading account"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -291,7 +316,14 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
           )}
 
           {/* Tab Content Container */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+          <UserBottomNav
+            active={activeTab}
+            onSelect={(t) => setActiveTab(t)}
+            onMore={() => setIsMobileSidebarOpen(true)}
+            badge={unreadEmailsCount}
+          />
+
+          <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 pb-28 md:pb-6 space-y-6">
 
             {/* TAB: KYC & VERIFICATION */}
             {activeTab === 'kyc' && (
@@ -312,34 +344,36 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
           {/* TAB 1: OVERVIEW */}
           {activeTab === 'portfolio' && (
             <div className="space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+                <div className="col-span-2 sm:col-span-1 p-4 rounded-2xl bg-gradient-to-br from-[#1f2a17] to-white/[0.03] sm:from-white/[0.03] border border-[#6dff8a]/20 sm:border-white/10 space-y-1">
                   <span className="text-xs text-white/50 block">Available Cash (Real)</span>
-                  <span className="text-2xl font-bold text-white font-mono">
+                  <span className="text-3xl sm:text-2xl font-bold text-white tabular-nums">
                     ${currentUser.realBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </span>
                   <div className="text-[11px] text-[#6dff8a]">Instant bank wire &amp; crypto clearing</div>
                 </div>
 
-                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1">
-                  <span className="text-xs text-white/50 block">Virtual Practice Balance</span>
-                  <span className="text-2xl font-bold text-white/80 font-mono">
+                <div className="p-3 sm:p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1 min-w-0">
+                  <span className="text-xs text-white/50 block">Practice balance</span>
+                  <span className="text-base sm:text-2xl font-bold text-white/80 tabular-nums block truncate">
                     ${currentUser.virtualBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </span>
-                  <div className="text-[11px] text-white/40">Risk-free paper trading</div>
+                  <div className="text-[11px] text-white/40 truncate">Risk-free paper trading</div>
                 </div>
 
-                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1">
-                  <span className="text-xs text-white/50 block">CopyTrader Portfolio</span>
-                  <span className="text-2xl font-bold text-[#6dff8a] font-mono">
+                <button onClick={() => setActiveTab('copy')} className="text-left p-3 sm:p-4 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-[#6dff8a]/30 space-y-1 min-w-0">
+                  <span className="text-xs text-white/50 block">CopyTrader</span>
+                  <span className="text-base sm:text-2xl font-bold text-[#6dff8a] tabular-nums block truncate">
                     ${copiedInvestors.reduce((a, b) => a + b.currentValue, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </span>
-                  <div className="text-[11px] text-[#6dff8a]">+$1,634.10 combined profit</div>
-                </div>
+                  {(() => { const p = copiedInvestors.reduce((a, b) => a + b.profit, 0); return (
+                    <div className={`text-[11px] ${p >= 0 ? 'text-[#6dff8a]' : 'text-[#ff7a7a]'}`}>{copiedInvestors.length ? `${p >= 0 ? '+' : '−'}$${Math.abs(p).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} profit across ${copiedInvestors.length} cop${copiedInvestors.length === 1 ? 'y' : 'ies'}` : 'Not copying anyone yet'}</div>
+                  ); })()}
+                </button>
               </div>
 
               {/* Quick Actions Bar */}
-              <div className="flex flex-wrap gap-3">
+              <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:gap-3 [&>button]:justify-center [&>button]:min-h-11">
                 <button
                   disabled={!currentUser.allowTrading}
                   onClick={() => onOpenTrade('NVDA')}
@@ -350,7 +384,7 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
                   }`}
                 >
                   <PlusCircle className="w-4 h-4" />
-                  <span>{currentUser.allowTrading ? 'Trade Stocks & Crypto' : 'Trading Restricted'}</span>
+                  <span className="sm:hidden">{currentUser.allowTrading ? 'Trade' : 'Restricted'}</span><span className="hidden sm:inline">{currentUser.allowTrading ? 'Trade Stocks & Crypto' : 'Trading Restricted'}</span>
                 </button>
 
                 <button
@@ -358,7 +392,7 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
                   className="px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-colors"
                 >
                   <ArrowDownLeft className="w-4 h-4 text-[#6dff8a]" />
-                  <span>Deposit Funds</span>
+                  <span className="sm:hidden">Deposit</span><span className="hidden sm:inline">Deposit Funds</span>
                 </button>
 
                 <button
@@ -366,7 +400,7 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
                   className="px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-colors"
                 >
                   <ArrowUpRight className="w-4 h-4 text-yellow-400" />
-                  <span>Withdraw Funds</span>
+                  <span className="sm:hidden">Withdraw</span><span className="hidden sm:inline">Withdraw Funds</span>
                 </button>
 
                 <button
@@ -374,7 +408,7 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
                   className="px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-bold text-xs flex items-center gap-2 border border-white/15 transition-colors"
                 >
                   <Sparkles className="w-4 h-4 text-[#6dff8a]" />
-                  <span>Copy Pro Investors</span>
+                  <span className="sm:hidden">Copy investors</span><span className="hidden sm:inline">Copy Pro Investors</span>
                 </button>
               </div>
 
@@ -458,15 +492,15 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
                   <Layers className="w-10 h-10 mx-auto text-white/30" />
                   <p className="text-sm">No open positions currently active for this account.</p>
                   <button
-                    onClick={() => onOpenTrade('BTC')}
+                    onClick={() => setActiveTab('markets')}
                     className="px-4 py-2 rounded-full bg-[#6dff8a] text-[#15170f] font-bold text-xs"
                   >
-                    Explore Markets
+                    Browse &amp; Trade Markets
                   </button>
                 </div>
               ) : (
-                <div className="border border-white/10 rounded-2xl overflow-hidden">
-                  <table className="w-full text-left text-xs">
+                <div className="border border-white/10 rounded-2xl overflow-x-auto">
+                  <table className="w-full min-w-[640px] md:min-w-0 text-left text-xs">
                     <thead className="bg-[#1a1d13] text-white/50 uppercase border-b border-white/10 font-mono text-[10px]">
                       <tr>
                         <th className="p-3.5">Asset</th>
@@ -513,6 +547,11 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
                 </div>
               )}
             </div>
+          )}
+
+          {/* TAB: LIVE MARKETS SCREENER */}
+          {activeTab === 'markets' && (
+            <MarketsTab onOpenTrade={onOpenTrade} allowTrading={currentUser.allowTrading} />
           )}
 
           {/* TAB 3: DEPOSIT */}
@@ -680,8 +719,8 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
                 </div>
               </div>
 
-              <div className="border border-white/10 rounded-2xl overflow-hidden bg-black/20">
-                <table className="w-full text-left text-xs">
+              <div className="border border-white/10 rounded-2xl overflow-x-auto bg-black/20">
+                <table className="w-full min-w-[640px] md:min-w-0 text-left text-xs">
                   <thead className="bg-[#181b11] text-white/50 uppercase border-b border-white/10 font-mono text-[10px]">
                     <tr>
                       <th className="p-3.5">Ref / Date</th>
@@ -748,73 +787,7 @@ const UserDashboardInner: React.FC<UserDashboardModalProps> = ({
           )}
 
           {/* TAB 6: COPYTRADER */}
-          {activeTab === 'copy' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-bold text-white">CopyTrader™ Portfolio</h3>
-                  <p className="text-xs text-[#a3a89e]">Pro Investors mirrored in your live account.</p>
-                </div>
-              </div>
-
-              {copiedInvestors.length === 0 && (
-                <div className="p-8 rounded-2xl bg-white/[0.03] border border-white/10 text-center space-y-3">
-                  <p className="text-sm text-white/60">You are not copying anyone yet.</p>
-                  <a href="/popular-investors" className="inline-block px-5 py-2.5 rounded-full bg-[#6dff8a] text-[#15170f] font-bold text-xs">Browse Popular Investors</a>
-                </div>
-              )}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {copiedInvestors.map((inv) => (
-                  <div key={inv.id} className="p-5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-11 h-11 rounded-2xl bg-[#6dff8a]/20 border border-[#6dff8a]/40 flex items-center justify-center font-bold text-white text-sm">
-                          {inv.name.slice(0, 2)}
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-white text-sm">{inv.name}</h4>
-                          <span className="text-xs text-white/50">{inv.handle}</span>
-                        </div>
-                      </div>
-                      <span className="px-2 py-0.5 rounded-full bg-[#6dff8a]/20 text-[#6dff8a] text-[10px] font-bold">
-                        {inv.status} • since {inv.startedDate}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2 p-3 rounded-xl bg-black/40 text-xs">
-                      <div>
-                        <span className="text-white/40 block text-[10px]">Allocated:</span>
-                        <span className="font-bold text-white font-mono">${inv.allocated.toLocaleString()}</span>
-                      </div>
-                      <div>
-                        <span className="text-white/40 block text-[10px]">Current Value:</span>
-                        <span className="font-bold text-white font-mono">${inv.currentValue.toLocaleString()}</span>
-                      </div>
-                      <div>
-                        <span className="text-white/40 block text-[10px]">Profit:</span>
-                        <span className={`font-bold font-mono ${inv.profitPercent >= 0 ? 'text-[#6dff8a]' : 'text-[#ff5c5c]'}`}>{inv.profitPercent >= 0 ? '+' : ''}{inv.profitPercent}%</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-1">
-                      <span className="text-xs text-white/50">Risk Score: <strong>{inv.riskScore} / 10</strong></span>
-                      <button
-                        onClick={async () => {
-                          try {
-                            await stopCopy(inv.id);
-                            notify(`Stopped copying ${inv.name}. Funds returned to your balance.`);
-                          } catch (err) { notify(errMsg(err), 'error'); }
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-[#ff5c5c]/20 hover:text-[#ff5c5c] text-xs font-bold transition-colors"
-                      >
-                        Stop Copying
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {activeTab === 'copy' && <UserCopyTraderTab onDeposit={() => setActiveTab('deposit')} />}
 
           {/* TAB 7: ACCOUNT & SECURITY */}
           {activeTab === 'settings' && (
@@ -998,6 +971,227 @@ const SecurityPanel: React.FC<{
         </div>
         <button onClick={() => run(resetPractice, 'Practice balance reset')} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs">Reset virtual balance</button>
       </div>
+    </div>
+  );
+};
+
+// ------------------------------------------------------------------
+// MarketsTab — Live instruments browser with trade buttons
+// ------------------------------------------------------------------
+const CATEGORIES = ['All', 'Stocks', 'Crypto', 'ETFs', 'Commodities', 'Currencies', 'Indices'];
+
+const MarketsTab: React.FC<{ onOpenTrade: (symbol: string) => void; allowTrading: boolean }> = ({ onOpenTrade, allowTrading }) => {
+  const { instruments } = useBrokerage();
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('All');
+
+  const filtered = useMemo(() => {
+    return instruments.filter(inst => {
+      const matchCat = category === 'All' || inst.category?.toLowerCase() === category.toLowerCase();
+      const q = search.toLowerCase();
+      const matchQ = !q || inst.symbol.toLowerCase().includes(q) || inst.name.toLowerCase().includes(q);
+      return matchCat && matchQ;
+    });
+  }, [instruments, search, category]);
+
+  const categoryColors: Record<string, string> = {
+    Stocks: 'bg-blue-500/20 text-blue-400',
+    Crypto: 'bg-orange-500/20 text-orange-400',
+    ETFs: 'bg-purple-500/20 text-purple-400',
+    Commodities: 'bg-yellow-500/20 text-yellow-400',
+    Currencies: 'bg-teal-500/20 text-teal-400',
+    Indices: 'bg-pink-500/20 text-pink-400',
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+        <div>
+          <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-[#6dff8a]" />
+            Live Markets Screener
+          </h3>
+          <p className="text-xs text-[#a3a89e]">{instruments.length}+ instruments available — click Trade to open a position</p>
+        </div>
+        {!allowTrading && (
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-semibold">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            Trading Restricted
+          </div>
+        )}
+      </div>
+
+      {/* Search + Category Filter */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-white/40 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by symbol or name (e.g. AAPL, Bitcoin...)"
+            className="w-full bg-black/40 border border-white/15 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#6dff8a] placeholder:text-white/30"
+          />
+        </div>
+      </div>
+
+      {/* Category Tabs */}
+      <div className="flex gap-2 flex-wrap">
+        {CATEGORIES.map(cat => (
+          <button
+            key={cat}
+            onClick={() => setCategory(cat)}
+            className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+              category === cat
+                ? 'bg-[#6dff8a] text-[#15170f]'
+                : 'bg-white/5 text-white/70 hover:bg-white/10 border border-white/10'
+            }`}
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
+
+      {/* Instruments Grid */}
+      {filtered.length === 0 ? (
+        <div className="py-16 text-center text-white/40 space-y-2">
+          <Search className="w-10 h-10 mx-auto opacity-30" />
+          <p className="text-sm">No instruments found for "{search}"</p>
+          <button onClick={() => { setSearch(''); setCategory('All'); }} className="text-xs text-[#6dff8a] hover:underline">Clear filters</button>
+        </div>
+      ) : (
+        <>
+          {/* Mobile Cards */}
+          <div className="grid grid-cols-1 gap-3 sm:hidden">
+            {filtered.slice(0, 40).map(inst => {
+              const isUp = (inst.deltaPercent || 0) >= 0;
+              return (
+                <div key={inst.symbol} className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-[#6dff8a]/30 transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center font-bold text-xs text-white shrink-0">
+                      {inst.symbol.slice(0, 3)}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-white text-sm">{inst.symbol}</span>
+                        {inst.category && (
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${categoryColors[inst.category] || 'bg-white/10 text-white/60'}`}>
+                            {inst.category}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-white/50 truncate block max-w-[160px]">{inst.name}</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-white font-mono text-sm">
+                      ${inst.price ? inst.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                    </div>
+                    {inst.deltaPercent !== undefined && (
+                      <div className={`text-xs font-bold ${isUp ? 'text-[#6dff8a]' : 'text-[#ff5c5c]'}`}>
+                        {isUp ? '▲' : '▼'} {Math.abs(inst.deltaPercent).toFixed(2)}%
+                      </div>
+                    )}
+                    <button
+                      disabled={!allowTrading}
+                      onClick={() => onOpenTrade(inst.symbol)}
+                      className={`mt-1.5 px-3 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                        allowTrading
+                          ? 'bg-[#6dff8a] text-[#15170f] hover:bg-[#5ce077]'
+                          : 'bg-white/10 text-white/30 cursor-not-allowed'
+                      }`}
+                    >
+                      Trade
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop Table */}
+          <div className="hidden sm:block border border-white/10 rounded-2xl overflow-x-auto">
+            <table className="w-full min-w-[640px] md:min-w-0 text-left text-xs">
+              <thead className="bg-[#1a1d13] text-white/50 uppercase border-b border-white/10 font-mono text-[10px]">
+                <tr>
+                  <th className="p-3.5">Asset</th>
+                  <th className="p-3.5">Category</th>
+                  <th className="p-3.5">Price</th>
+                  <th className="p-3.5">24h Change</th>
+                  <th className="p-3.5">Spread</th>
+                  <th className="p-3.5">Status</th>
+                  <th className="p-3.5 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10 bg-black/20">
+                {filtered.slice(0, 60).map(inst => {
+                  const isUp = (inst.deltaPercent || 0) >= 0;
+                  const halted = inst.halted || inst.status === 'Halted';
+                  return (
+                    <tr key={inst.symbol} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="p-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center font-bold text-[11px] text-white shrink-0">
+                            {inst.symbol.slice(0, 3)}
+                          </div>
+                          <div>
+                            <div className="font-bold text-white">{inst.symbol}</div>
+                            <div className="text-white/40 truncate max-w-[140px]">{inst.name}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="p-3.5">
+                        {inst.category && (
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${categoryColors[inst.category] || 'bg-white/10 text-white/60'}`}>
+                            {inst.category}
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3.5 font-mono font-bold text-white">
+                        ${inst.price ? inst.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                      </td>
+                      <td className="p-3.5">
+                        {inst.deltaPercent !== undefined ? (
+                          <span className={`flex items-center gap-1 font-bold ${isUp ? 'text-[#6dff8a]' : 'text-[#ff5c5c]'}`}>
+                            {isUp ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                            {isUp ? '+' : ''}{inst.deltaPercent.toFixed(2)}%
+                          </span>
+                        ) : <span className="text-white/30">—</span>}
+                      </td>
+                      <td className="p-3.5 text-white/60 font-mono">{inst.spread || '—'}</td>
+                      <td className="p-3.5">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${halted ? 'bg-red-500/20 text-red-400' : 'bg-[#6dff8a]/20 text-[#6dff8a]'}`}>
+                          {halted ? 'Halted' : 'Live'}
+                        </span>
+                      </td>
+                      <td className="p-3.5 text-right">
+                        <button
+                          disabled={!allowTrading || halted}
+                          onClick={() => onOpenTrade(inst.symbol)}
+                          className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            allowTrading && !halted
+                              ? 'bg-[#6dff8a] text-[#15170f] hover:bg-[#5ce077] shadow-[0_0_10px_rgba(109,255,138,0.2)]'
+                              : 'bg-white/10 text-white/30 cursor-not-allowed'
+                          }`}
+                        >
+                          <Zap className="w-3 h-3" />
+                          Trade Now
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {filtered.length > 60 && (
+              <div className="p-4 text-center text-xs text-white/40 border-t border-white/10">
+                Showing 60 of {filtered.length} instruments. Use the search bar to find specific assets.
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 };

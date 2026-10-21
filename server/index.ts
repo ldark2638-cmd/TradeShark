@@ -33,7 +33,7 @@ async function main() {
   const app = express();
   app.set('trust proxy', 1); // Railway sits behind a proxy
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '1mb' }));
+  app.use(express.json({ limit: '2mb' })); // room for admin-uploaded investor photos
   app.use(express.urlencoded({ extended: true }));
   app.use(cookieParser());
 
@@ -68,7 +68,7 @@ async function main() {
     app.get('/robots.txt', (_req, res) => res.type('text/plain').send(`User-agent: *\nDisallow: /admin\nDisallow: /dashboard\nSitemap: ${config.appUrl}/sitemap.xml\n`));
     app.get('/sitemap.xml', (_req, res) => {
       const cats = Array.from(new Set(INSTRUMENTS.map(i => i.category)));
-      const paths = ['/', '/markets', ...cats.map(c => `/markets/${c}`), '/popular-investors', ...SITE_PAGES.map(p => `/${p.slug}`)];
+      const paths = ['/', '/markets', ...cats.map(c => `/markets/${c}`), ...SITE_PAGES.map(p => `/${p.slug}`)];
       const today = new Date().toISOString().slice(0, 10);
       res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${paths.map(p => `  <url><loc>${config.appUrl}${p}</loc><lastmod>${today}</lastmod></url>`).join('\n')}\n</urlset>`);
     });

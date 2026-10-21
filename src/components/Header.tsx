@@ -169,7 +169,7 @@ export const Header: React.FC<HeaderProps> = ({
                       </span>
                       <ul className="space-y-2.5 text-sm text-[#d4d6cf]">
                         <li><a href="/copytrader" className="hover:text-[#6dff8a] transition-colors block">CopyTrader™</a></li>
-                        <li><a href="/popular-investors" className="hover:text-[#6dff8a] transition-colors block">Pro Investors</a></li>
+                        <li><a href="/dashboard?tab=copy" className="hover:text-[#6dff8a] transition-colors block">Pro Investors</a></li>
                         <li><a href="/smart-portfolios" className="hover:text-[#6dff8a] transition-colors block">Smart Portfolios</a></li>
                       </ul>
                     </div>

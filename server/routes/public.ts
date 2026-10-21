@@ -6,7 +6,6 @@ import { mailProvider, queueMail } from '../mailer';
 import { createMessage, marketSnapshot, getQuote, getMarketSettings } from '../services';
 import { rateLimit } from '../rateLimit';
 import { INSTRUMENTS } from '../../src/data/mockData';
-import { listInvestors } from '../copytrader';
 
 export const publicRouter = Router();
 
@@ -45,11 +44,6 @@ publicRouter.get('/config', (_req, res) => {
       loginOtp: config.loginOtp,
     },
   });
-});
-
-publicRouter.get('/investors', (_req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  res.json({ investors: listInvestors(), time: Date.now() });
 });
 
 publicRouter.get('/market', (_req, res) => {
@@ -139,8 +133,7 @@ function fallbackReply(q: string) {
     return { reply: `${inst.name} (${sym}) is trading at $${quote.price.toLocaleString()} on ${config.brand.appName} right now. You can open a commission-free position, set a stop-loss, or add it to a watchlist from the trade ticket. Remember that prices can move quickly - only invest what you can afford to lose.`, symbol: sym };
   }
   if (lower.includes('copy') || lower.includes('investor')) {
-    const top = [...listInvestors()].sort((a, b) => b.return24M - a.return24M)[0];
-    return { reply: `CopyTrader lets you automatically mirror a Popular Investor's trades in proportion to the amount you allocate (minimum $200). The highest 24-month return on our leaderboard right now is ${top.name} (${top.handle}) at +${top.return24M}% with a risk score of ${top.riskScore}/10. Past performance is not a reliable indicator of future results.` };
+    return { reply: `CopyTrader lets you automatically mirror a Popular Investor's trades in proportion to the amount you allocate (minimum $200). Sign in and open the CopyTrader tab in your client portal to browse investors, their track records and risk scores. Past performance is not a reliable indicator of future results.` };
   }
   if (lower.includes('fee') || lower.includes('cost') || lower.includes('commission')) {
     return { reply: `${config.brand.appName} offers commission-free stock and ETF investing, tight spreads on crypto (from 0.30%), and no account management fees. Overnight financing applies to leveraged positions. See the full fee schedule at ${config.appUrl}/fees.` };
@@ -164,11 +157,10 @@ publicRouter.post('/ai/chat', rateLimit('ai', 40, 600), async (req, res) => {
 
   try {
     const quotes = marketSnapshot().map(q => `${q.symbol}: $${q.price} (${q.deltaPercent >= 0 ? '+' : ''}${q.deltaPercent}%)`).join(', ');
-    const investors = listInvestors().map(i => `${i.name} ${i.handle} +${i.return24M}% 24M, risk ${i.riskScore}/10, ${i.copiers} copiers`).join('; ');
     const systemInstruction = `You are Shark AI, the assistant for ${config.brand.appName} (${config.appUrl}), a multi-asset trading platform (stocks, ETFs, crypto, commodities, indices, currencies, CopyTrader).
 Be concise (max ~120 words), friendly and factual. Never promise returns or give personalised financial advice; add a brief risk reminder when discussing specific trades.
 Current platform prices: ${quotes}.
-Popular investors: ${investors}.
+CopyTrader investors are only listed inside the signed-in client portal (CopyTrader tab); do not name any.
 Platform facts: commission-free stocks & ETFs, crypto spreads from 0.30%, minimum deposit $${config.minDeposit}, practice account with $${config.practiceBalance.toLocaleString()} virtual funds, support email ${config.brand.supportEmail}.`;
     const contents = [
       ...history.map((h: any) => ({ role: h.sender === 'user' ? 'user' : 'model', parts: [{ text: String(h.text || '').slice(0, 1500) }] })),

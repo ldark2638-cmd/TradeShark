@@ -467,7 +467,7 @@ export const LEGACY_LINKS: Record<string, string> = {
   fees: '/fees', 'fee-schedule': '/fees', hours: '/market-hours', cfd: '/cfd-trading', futures: '/futures', 'pro-account': '/professional-account',
   copytrader: '/copytrader', portfolios: '/smart-portfolios', recurring: '/recurring-investments', alpha: '/alpha-portfolios',
   'shark-ai': '/shark-ai', 'agent-portfolios': '/agent-portfolios', 'ai-screener': '/predictive-screener',
-  'pro-investors': '/popular-investors', club: '/club', interest: '/interest-on-cash', protection: '/account-protection',
+  'pro-investors': '/dashboard?tab=copy', club: '/club', interest: '/interest-on-cash', protection: '/account-protection',
   academy: '/academy', basics: '/getting-started', insights: '/market-news', earnings: '/earnings-calendar', digest: '/daily-digest',
   about: '/about', support: '/help', help: '/help', media: '/press', careers: '/careers', investors: '/investor-relations', ir: '/investor-relations',
   risk: '/risk-disclosure', safety: '/regulation', regulation: '/regulation', webtrader: '/webtrader', demo: '/practice-account',
